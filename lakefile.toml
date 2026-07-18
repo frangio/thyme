@@ -1,0 +1,9 @@
+name = "staging"
+version = "0.1.0"
+defaultTargets = ["Staging"]
+
+[leanOptions]
+backward.do.legacy = true
+
+[[lean_lib]]
+name = "Staging"
