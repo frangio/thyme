@@ -149,14 +149,14 @@ partial def getConstAppTransform? (name : Name) : Option (ConstAppTransform Stag
     some transformCode
   else if name == ``Code.quote then
     some transformQuote
-  else if name == ``Code.splice then
+  else if name == ``Code.value then
     some transformSplice
   else
     none
 
 partial def transformCode (mode : TypeMode) (fn : Expr) (args : Array Expr) :
     StagingM mode.Result := do
-  let .const ``Code [level] := fn | unreachable!
+  let .const _ [level] := fn | unreachable!
   unless args.size ≥ 1 do throwError "invalid Code application"
   let type := args[0]!
   let type ← withSuccFrame (transform (.expect (.sort level) #[]) type)
@@ -165,7 +165,7 @@ partial def transformCode (mode : TypeMode) (fn : Expr) (args : Array Expr) :
 
 partial def transformQuote (mode : TypeMode) (quoteFn : Expr) (args : Array Expr) :
     StagingM mode.Result := do
-  let .const ``Code.quote [level] := quoteFn | unreachable!
+  let .const _ [level] := quoteFn | unreachable!
   unless args.size = 3 do throwError "invalid Code.quote application"
   let sourceBody := args[1]!
   let mkCodeType type :=
@@ -213,8 +213,8 @@ where
 
 partial def transformSplice (mode : TypeMode) (spliceFn : Expr) (args : Array Expr) :
     StagingM mode.Result := do
-  let .const ``Code.splice [level] := spliceFn | unreachable!
-  unless args.size ≥ 2 do throwError "invalid Code.splice application"
+  let .const _ [level] := spliceFn | unreachable!
+  unless args.size ≥ 2 do throwError "invalid Code.value application"
   let sourceBody := args[1]!
   if args.size = 2 then
     transformCore mode level sourceBody
@@ -256,7 +256,7 @@ where
       let type : Expr := match mode with
         | .expect typeAbs typeEnv => instantiate typeAbs typeEnv
         | .synth => bodyType
-      let expr := mkApp2 (mkConst ``Code.splice [level]) bodyType body
+      let expr := mkApp2 (mkConst ``Code.value [level]) bodyType body
       return mode.mkResult expr type
 
   transformBody (sourceBody : Expr) : StagingM (Expr × Expr) := do
@@ -276,14 +276,14 @@ public meta register_option staging.raw : Bool := {
 
 public meta def withCodeReducible (k : TermElabM α) : TermElabM α := do
   let quoteStatus ← getReducibilityStatus ``Code.quote
-  let spliceStatus ← getReducibilityStatus ``Code.splice
+  let valueStatus ← getReducibilityStatus ``Code.value
   try
     setReducibilityStatus ``Code.quote .reducible
-    setReducibilityStatus ``Code.splice .reducible
+    setReducibilityStatus ``Code.value .reducible
     k
   finally
     setReducibilityStatus ``Code.quote quoteStatus
-    setReducibilityStatus ``Code.splice spliceStatus
+    setReducibilityStatus ``Code.value valueStatus
 
 public meta def elabStagingTerm (stx : Syntax) (expectedType? : Option Expr) : TermElabM Expr := do
   if staging.raw.get (← getOptions) then
@@ -321,13 +321,18 @@ syntax:max (name := spliceStx) "~" term:max : term
 open PrettyPrinter Delaborator
 open PrettyPrinter.Delaborator.SubExpr
 
+private def ppStagingNotation := `Staging.pp.stagingNotation
+
+private def withStagingNotation (x : DelabM α) : DelabM α :=
+  withOptions (·.setBool ppStagingNotation true) x
+
 @[app_delab Staging.Code]
 meta def delabCode : Delab := whenNotPPOption getPPExplicit <| whenPPOption getPPNotation do
   match (← getExpr).getAppNumArgs with
   | 0 =>
     `(Code)
   | 1 =>
-    let type ← withNaryArg 0 delab
+    let type ← withNaryArg 0 <| withStagingNotation delab
     `(Code $type)
   | _ =>
     failure
@@ -335,12 +340,13 @@ meta def delabCode : Delab := whenNotPPOption getPPExplicit <| whenPPOption getP
 @[app_delab Code.quote]
 meta def delabQuote : Delab :=
     whenNotPPOption getPPExplicit <| whenPPOption getPPNotation <| withOverApp 3 do
-  let value ← withNaryArg 1 delab
+  let value ← withNaryArg 1 <| withStagingNotation delab
   `(`⟨$value⟩)
 
-@[app_delab Code.splice]
+@[app_delab Code.value]
 meta def delabSplice : Delab :=
     whenNotPPOption getPPExplicit <| whenPPOption getPPNotation <| withOverApp 2 do
+  guard <| (← getOptions).getBool ppStagingNotation
   let body ← withNaryArg 1 delab
   `(~$body)
 
@@ -361,7 +367,7 @@ meta def elabQuote : TermElab := fun stx expectedType? => do
 @[term_elab spliceStx]
 meta def elabSplice : TermElab := fun stx expectedType? => do
   let `(~$body) := stx | throwUnsupportedSyntax
-  elabStagingTerm (← ``(Staging.Code.splice $body)) expectedType?
+  elabStagingTerm (← ``(Staging.Code.value $body)) expectedType?
 
 end
 

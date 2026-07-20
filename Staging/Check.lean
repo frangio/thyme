@@ -85,7 +85,7 @@ def opName : AppState → Name
   | .regular => unreachable!
   | .code0 | .code1 => ``Code
   | .quote0 | .quote1 | .quote2 | .quote3 => ``Code.quote
-  | .splice0 | .splice1 | .splice2 => ``Code.splice
+  | .splice0 | .splice1 | .splice2 => ``Code.value
 
 end AppState
 
@@ -152,7 +152,7 @@ partial def checkApp (e : Expr) (depth : Int) : CheckM AppState := do
         return .code0
       else if name == ``Code.quote then
         return .quote0
-      else if name == ``Code.splice then
+      else if name == ``Code.value then
         return .splice0
       else
         checkStage fn depth

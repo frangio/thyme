@@ -22,7 +22,7 @@ def gen : Code α → Codegen
   | .mk _ xfc => xfc.run
 
 @[expose]
-def splice : Code α → α
+def value : Code α → α
   | .mk get _ => get ()
 
 @[expose, macro_inline]
@@ -33,17 +33,21 @@ def forge (h : False) (gen : Codegen) : Code α :=
   mk (elimThunk h) (.squash fun _ => gen)
 
 @[simp]
-theorem splice_quote (a : α) :
-    (quote a).splice = a :=
+theorem value_quote (a : α) (xfc : ExfCodegen := .default) :
+    (quote a xfc).value = a :=
   rfl
 
 @[simp]
-theorem quote_splice (a : Code α) (xfc : ExfCodegen):
-    quote a.splice xfc = a := by
+theorem quote_value (a : Code α) (xfc : ExfCodegen := .default) :
+    quote a.value xfc = a := by
   simp [quote]
   congr
   funext _
   nofun
+
+@[ext]
+theorem ext_value {a b : Code α} (h : a.value = b.value) : a = b := by
+  rw [← quote_value a, ← quote_value b, h]
 
 end Code
 

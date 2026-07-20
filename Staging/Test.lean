@@ -20,11 +20,13 @@ def exp (n : Nat) (x : Code Nat) : Code Nat :=
 
 #guard_expr ~(exp 3 `⟨4⟩) =ₛ 1 * 4 * 4 * 4
 
-theorem exp_eq_pow (n : Nat) (x : Code Nat) : (exp n x).splice = x.splice ^ n := by
+#guard_expr fun (x : Nat) => ~(exp 3 `⟨x⟩) =ₛ fun (x : Nat) => 1 * x * x * x
+
+theorem exp_eq_pow (n : Nat) (x : Code Nat) : (exp n x).value = x.value ^ n := by
   unfold exp
   induction n with
   | zero => rfl
-  | succ n ih => simp [Nat.repeat, ih]; rfl
+  | succ n ih => simp [Nat.repeat, Nat.pow_succ, ih]
 
 def Vec (n : Nat) (α : Code Type) :=
   n.repeat (fun β => `⟨~α × ~β⟩) `⟨Unit⟩
