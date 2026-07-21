@@ -5,22 +5,22 @@ import Staging.Elab
 
 open Staging
 
-def id₀ (α : Code Type) (a : Code ~α) : Code ~α := a
+def idc (α : Code Type) (a : Code ~α) : Code ~α := a
 
-#guard_expr id₀ `⟨Nat⟩ `⟨0⟩ =~ `⟨0⟩
+#guard_expr idc `⟨Bool⟩ `⟨true⟩ =~ `⟨true⟩
 
 def map (α β : Code Type) (f : Code ~α → Code ~β) (as : Code (List ~α)) : Code (List ~β) :=
   `⟨(~as).foldr (fun a bs => ~(f `⟨a⟩) :: bs) []⟩
 
-#guard_expr (fun ns => ~(map `⟨Nat⟩ `⟨Nat⟩ (fun n => `⟨~n + 10⟩) `⟨ns⟩)) =~
-  (fun (ns : List Nat) => ns.foldr (fun (a : Nat) (bs : List Nat) => (a + 10) :: bs) [])
+#guard_expr fun (ns : List Nat) => ~(map `⟨Nat⟩ `⟨Nat⟩ (fun n => `⟨~n + 10⟩) `⟨ns⟩) =ₛ
+  fun (ns : List Nat) => ns.foldr (fun (a : Nat) (bs : List Nat) => (a + 10) :: bs) []
 
 def exp (n : Nat) (x : Code Nat) : Code Nat :=
-    n.repeat (fun y => `⟨~y * ~x⟩) `⟨1⟩
+  n.repeat (fun y => `⟨~y * ~x⟩) `⟨1⟩
 
 #guard_expr ~(exp 3 `⟨4⟩) =ₛ 1 * 4 * 4 * 4
 
-#guard_expr fun (x : Nat) => ~(exp 3 `⟨x⟩) =ₛ fun (x : Nat) => 1 * x * x * x
+#guard_expr fun x => ~(exp 3 `⟨x⟩) =ₛ fun x => 1 * x * x * x
 
 theorem exp_eq_pow (n : Nat) (x : Code Nat) : (exp n x).value = x.value ^ n := by
   unfold exp
@@ -33,42 +33,48 @@ def Vec (n : Nat) (α : Code Type) :=
 
 #guard_expr ~(Vec 3 `⟨Char⟩) =ₛ Char × Char × Char × Unit
 
+def Vec.map {α β : Code Type} (n : Nat) (f : Code ~α → Code ~β) (as : Code ~(Vec n α)) : Code ~(Vec n β) :=
+  match n with
+  | 0 => `⟨()⟩
+  | n + 1 => `⟨(~(f `⟨(~as).1⟩), ~(map n f `⟨(~as).2⟩))⟩
 
-def two : Code Nat := `⟨2⟩
+#guard_expr fun (ns : ~(Vec 2 `⟨Nat⟩)) =>
+    ~(Vec.map 2 (fun n => `⟨~n + 10⟩) `⟨ns⟩) =ₛ
+  fun (ns : Nat × Nat × Unit) => (ns.1 + 10, ns.2.1 + 10, ())
 
-#guard_expr ~two =ₛ 2
-#guard_expr ~`⟨2⟩ =ₛ 2
+section
 
-def add1 : Code Nat → Code Nat :=
-  fun x => `⟨~x + 1⟩
+variable {α : Code Type} {β : Code (~α → Type)}
 
-#guard_expr ~(add1 `⟨2⟩) =ₛ 2 + 1
+def lift (f : Code ((x : ~α) → ~β x)) :
+    (x : Code ~α) → Code (~β ~x) :=
+  fun x => `⟨~f ~x⟩
 
-def lam (f : Code Nat → Code Nat) : Code (Nat → Nat) :=
+def unlift (f : (x : Code ~α) → Code (~β ~x)) :
+    Code ((x : ~α) → ~β x) :=
   `⟨fun x => ~(f `⟨x⟩)⟩
 
-#guard_expr ~(lam add1) =ₛ fun x => x + 1
+theorem unlift_lift (f : Code ((x : ~α) → ~β x)) :
+    unlift (lift f) = f := by
+  ext
+  rfl
 
-def app : Code (Nat → Nat) → Code Nat → Code Nat :=
-  fun f x => `⟨~f ~x⟩
+theorem lift_unlift (f : (x : Code ~α) → Code (~β ~x)) :
+    lift (unlift f) = f := by
+  ext
+  rfl
 
-#guard_expr ~(app `⟨fun x => x + 1⟩ `⟨2⟩) =~ 3
+end
 
-def thunk : Code (Nat → Nat) → Code Nat → Code (Unit → Nat) :=
-  fun f x => `⟨fun _y => ~f ~x⟩
+def sharePair (x : Code Nat) : Code (Nat × Nat) :=
+  `⟨let y := ~x; (y, y)⟩
 
-#guard_expr (~(thunk `⟨fun x => x + 1⟩ `⟨2⟩)) () =~ 3
+#guard_expr fun x => ~(sharePair `⟨x + x⟩) =ₛ fun x => let y := x + x; (y, y)
 
-def nestedLet : Code Nat :=
-  `⟨~(let x := `⟨0⟩; `⟨~x⟩)⟩
+def dependentArg (x : Code Nat) (h : Code (~x = 0)) : Code { n : Nat // n = 0 } :=
+  `⟨⟨~x, ~h⟩⟩
 
-#guard_expr ~nestedLet =~ 0
-
-def dependentArg (x : Code Nat) (_ : Code (~x = 0)) : Code Nat :=
-  x
-
-def dependentQuote : Code Nat :=
-  `⟨~(dependentArg `⟨0⟩ `⟨rfl⟩)⟩
+#guard_expr `⟨~(dependentArg `⟨0⟩ `⟨rfl⟩)⟩ =~ `⟨⟨0, rfl⟩⟩
 
 /-- error: invalid staging: bound variable `x` is available at stage -1, but is used at stage 0 -/
 #guard_msgs in

@@ -51,8 +51,17 @@ theorem quote_value (a : Code α) (xfc : ExfCodegen := .default) :
   nofun
 
 @[ext]
-theorem ext_value {a b : Code α} (h : a.value = b.value) : a = b := by
+theorem ext {a b : Code α} (h : a.value = b.value) : a = b := by
   rw [← quote_value a, ← quote_value b, h]
+
+@[ext]
+theorem funext
+    {α : Sort u} {β : Code α → Sort v}
+    {f g : (a : Code α) → β a}
+    (h : ∀ (a : α), f (quote a) = g (quote a)) :
+    f = g := by
+  funext x
+  rw [← quote_value x, h]
 
 end Code
 
