@@ -1,1 +1,4 @@
-import TMeta.Code
+module
+
+public import TMeta.Code
+public import TMeta.Elab
