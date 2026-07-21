@@ -13,21 +13,26 @@ def elimThunk (h : False) : Unit → α :=
 
 public section
 
-inductive Code (α : Sort u) : Sort (max 1 u) where
-  | mk (get : Unit → α) (xfc : ExfCodegen)
+structure Code (α : Sort u) : Sort (max 1 u) where
+  get : Unit → α
+  xfc : ExfCodegen
 
 namespace Code
 
-def gen : Code α → Codegen
-  | .mk _ xfc => xfc.run
+def gen (code : Code α) : Codegen :=
+  code.xfc.run
 
 @[expose]
-def value : Code α → α
-  | .mk get _ => get ()
+def value (code : Code α) : α :=
+  code.get ()
 
 @[expose, macro_inline]
 def quote (value : α) (xfc : ExfCodegen := False.elim) : Code α :=
   mk (fun _ => value) xfc.squash
+
+unif_hint (code : Code (Sort u)) (α : Sort u) where
+  code ≟ quote α
+  ⊢ code.get () ≟ α
 
 def forge (h : False) (gen : Codegen) : Code α :=
   mk (elimThunk h) (.squash fun _ => gen)
