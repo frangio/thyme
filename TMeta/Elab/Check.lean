@@ -161,7 +161,11 @@ partial def checkApp (e : Expr) (depth : Int) : CheckM AppState := do
 end
 
 public def checkStages (e : Expr) : MetaM Unit :=
-  (checkStage e 0).run' { binders := #[], segmentEnds := #[], segmentDepths := #[] }
+  (checkStage e 0).run' {
+    binders := #[]
+    segmentEnds := #[]
+    segmentDepths := #[]
+  }
 
 end
 

@@ -1,6 +1,7 @@
 module
 
 public meta import TMeta.Code
+public meta import TMeta.Elab.Check
 public meta import TMeta.Elab.TypedTransform
 public meta import TMeta.Elab.Runtime
 public meta import Lean.Elab.Term.TermElabM
@@ -45,16 +46,8 @@ structure StageFrame where
 
 structure TransformState where
   frames : Zipper StageFrame
-  depth : Int
+  stage : Int
   deriving Inhabited
-
-def TransformState.initial : TransformState where
-  frames := {
-    left := #[]
-    current := {}
-    right := #[]
-  }
-  depth := 0
 
 abbrev TransformM := StateT TransformState TermElabM
 
@@ -63,8 +56,8 @@ instance : Inhabited (TransformM α) := ⟨throw default⟩
 def getFrame : TransformM StageFrame :=
   return (← getThe TransformState).frames.current
 
-def getDepth : TransformM Int :=
-  return (← getThe TransformState).depth
+def getStage : TransformM Int :=
+  return (← getThe TransformState).stage
 
 def modifyFrame (f : StageFrame → StageFrame) : TransformM Unit :=
   modifyThe TransformState fun s =>
@@ -78,24 +71,24 @@ def modifyGetFrame (f : StageFrame → α × StageFrame) : TransformM α :=
 def withSuccFrame (k : TransformM α) : TransformM α := do
   modifyThe TransformState fun s => { s with
     frames := s.frames.moveRight
-    depth := s.depth + 1
+    stage := s.stage + 1
   }
   let result ← k
   modifyThe TransformState fun s => { s with
     frames := s.frames.moveLeft
-    depth := s.depth - 1
+    stage := s.stage - 1
   }
   return result
 
 def withPredFrame (k : TransformM α) : TransformM α := do
   modifyThe TransformState fun s => { s with
     frames := s.frames.moveLeft
-    depth := s.depth - 1
+    stage := s.stage - 1
   }
   let result ← k
   modifyThe TransformState fun s => { s with
     frames := s.frames.moveRight
-    depth := s.depth + 1
+    stage := s.stage + 1
   }
   return result
 
@@ -136,6 +129,8 @@ def withFVarAxioms (e : Expr) (k : Expr → TransformM α) : TransformM α :=
       addDecl <| .axiomDecl { name, levelParams, type, isUnsafe := false }
       axioms := axioms.push (mkConst name (levelParams.map .param))
     k (e.replaceFVars fvars axioms)
+
+namespace TransformM
 
 mutual
 
@@ -238,7 +233,7 @@ where
           }
       }
       return mode.mkResult hole type
-    else if (← getDepth) ≤ 0 then
+    else if (← getStage) ≤ 0 then
       withPredFrame <| withHFalse fun hFalse => do
         let (body, bodyType) ← transformBody sourceBody
         let type : Expr := match mode with
@@ -266,6 +261,18 @@ where
     return (body.expr, type)
 
 end
+
+end TransformM
+
+def transform (expectedType : Expr) (e : Expr) : TermElabM Expr := do
+  checkStages e
+  let lctx ← instantiateLCtxMVars (← getLCtx)
+  let localInstances ← getLocalInstances
+  withLCtx lctx localInstances <| withMCtx {} <|
+    (TransformM.transform (.expect expectedType #[]) e).run' {
+      frames := { left := #[], current := {}, right := #[] }
+      stage := 0
+    }
 
 end
 

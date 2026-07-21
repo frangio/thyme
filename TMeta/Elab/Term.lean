@@ -2,7 +2,6 @@ module
 
 public import TMeta.Elab.Runtime
 public meta import TMeta.Code
-public meta import TMeta.Elab.Check
 public meta import TMeta.Elab.Transform
 public meta import Lean.Elab.SyntheticMVars
 public meta import Lean.Elab.Term.TermElabM
@@ -53,12 +52,7 @@ def elabStagedTerm (stx : Syntax) (expectedType? : Option Expr) : TermElabM Expr
     let expectedType ← instantiateMVars expectedType
     ensureNoMVars raw
     ensureNoMVars expectedType
-    checkStages raw
-    let lctx ← instantiateLCtxMVars (← getLCtx)
-    let localInstances ← getLocalInstances
-    let state := TransformState.initial
-    let (result, _) ← withLCtx lctx localInstances <| withMCtx {} <| StateT.run
-      (transform (.expect expectedType #[]) raw) state
+    let result ← transform expectedType raw
     ensureHasType expectedType? result
 
 public section
