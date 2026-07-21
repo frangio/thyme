@@ -27,7 +27,7 @@ def value (code : Code α) : α :=
   code.get ()
 
 @[expose, macro_inline]
-def quote (value : α) (xfc : ExfCodegen := False.elim) : Code α :=
+def quote (value : α) (xfc : ExfCodegen := .default) : Code α :=
   mk (fun _ => value) xfc.squash
 
 unif_hint (code : Code (Sort u)) (α : Sort u) where

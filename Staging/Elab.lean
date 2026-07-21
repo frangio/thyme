@@ -285,6 +285,18 @@ public meta def withCodeReducible (k : TermElabM α) : TermElabM α := do
     setReducibilityStatus ``Code.quote quoteStatus
     setReducibilityStatus ``Code.value valueStatus
 
+def ensureNoMVars (e : Expr) : TermElabM Unit := do
+  if e.hasMVar then
+    tryPostpone
+    let mvars ← getMVars e
+    if ← logUnassignedUsingErrorInfos mvars then
+      throwAbortTerm
+    let levelMVars := (collectLevelMVars {} e).result
+    if ← logUnassignedLevelMVarsUsingErrorInfos levelMVars then
+      throwAbortTerm
+    throwMVarError <| m!"staging expression contains unresolved metavariables\n\
+      {MessageData.joinSep (mvars.toList.map MessageData.ofGoal) m!"\n\n"}"
+
 public meta def elabStagingTerm (stx : Syntax) (expectedType? : Option Expr) : TermElabM Expr := do
   if staging.raw.get (← getOptions) then
     elabTermEnsuringType stx expectedType?
@@ -292,11 +304,9 @@ public meta def elabStagingTerm (stx : Syntax) (expectedType? : Option Expr) : T
     let raw ← withCodeReducible do
       let raw ← withOptions (staging.raw.set · true) do
         elabTermEnsuringType stx expectedType?
-      synthesizeSyntheticMVars
+      synthesizeSyntheticMVarsNoPostponing
       instantiateMVars raw
-    if raw.hasMVar then
-      tryPostpone
-      throwError "staging expression contains unresolved metavariables"
+    ensureNoMVars raw
     checkStages raw
     let expectedType ← match expectedType? with
       | some expectedType => instantiateMVars expectedType
@@ -318,6 +328,25 @@ syntax:max (name := bareCodeStx) "Code" : term
 syntax:max (name := quoteStx) "`⟨" term "⟩" : term
 syntax:max (name := spliceStx) "~" term:max : term
 
+@[term_elab codeStx]
+meta def elabCode : TermElab := fun stx expectedType? => do
+  let `(Code $type) := stx | throwUnsupportedSyntax
+  elabStagingTerm (← ``(Staging.Code $type)) expectedType?
+
+@[term_elab bareCodeStx]
+meta def elabBareCode : TermElab := fun stx expectedType? => do
+  elabTerm (mkIdentFrom stx ``Staging.Code) expectedType?
+
+@[term_elab quoteStx]
+meta def elabQuote : TermElab := fun stx expectedType? => do
+  let `(`⟨$value⟩) := stx | throwUnsupportedSyntax
+  elabStagingTerm (← ``(Staging.Code.quote $value)) expectedType?
+
+@[term_elab spliceStx]
+meta def elabSplice : TermElab := fun stx expectedType? => do
+  let `(~$body) := stx | throwUnsupportedSyntax
+  elabStagingTerm (← ``(Staging.Code.value $body)) expectedType?
+
 open PrettyPrinter Delaborator
 open PrettyPrinter.Delaborator.SubExpr
 
@@ -327,7 +356,7 @@ private def withStagingNotation (x : DelabM α) : DelabM α :=
   withOptions (·.setBool ppStagingNotation true) x
 
 @[app_delab Staging.Code]
-meta def delabCode : Delab := whenNotPPOption getPPExplicit <| whenPPOption getPPNotation do
+meta def delabCode : Delab := do
   match (← getExpr).getAppNumArgs with
   | 0 =>
     `(Code)
@@ -350,24 +379,12 @@ meta def delabSplice : Delab :=
   let body ← withNaryArg 1 delab
   `(~$body)
 
-@[term_elab codeStx]
-meta def elabCode : TermElab := fun stx expectedType? => do
-  let `(Code $type) := stx | throwUnsupportedSyntax
-  elabStagingTerm (← ``(Staging.Code $type)) expectedType?
+@[app_delab ExfCodegen.squash]
+meta def delabExfCodegenSquash : Delab := withOverApp 1 do
+  `(⋯)
 
-@[term_elab bareCodeStx]
-meta def elabBareCode : TermElab := fun stx expectedType? => do
-  elabTerm (mkIdentFrom stx ``Staging.Code) expectedType?
-
-@[term_elab quoteStx]
-meta def elabQuote : TermElab := fun stx expectedType? => do
-  let `(`⟨$value⟩) := stx | throwUnsupportedSyntax
-  elabStagingTerm (← ``(Staging.Code.quote $value)) expectedType?
-
-@[term_elab spliceStx]
-meta def elabSplice : TermElab := fun stx expectedType? => do
-  let `(~$body) := stx | throwUnsupportedSyntax
-  elabStagingTerm (← ``(Staging.Code.value $body)) expectedType?
+@[app_delab ExfCodegen.default]
+meta def delabExfCodegenDefault : Delab := `(⋯)
 
 end
 

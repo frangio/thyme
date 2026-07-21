@@ -35,6 +35,8 @@ private def squashImpl (xfc : ExfCodegen) : ExfCodegen :=
 def squash (xfc : ExfCodegen) : ExfCodegen :=
   False.elim
 
+def default : ExfCodegen := False.elim
+
 end ExfCodegen
 
 end
