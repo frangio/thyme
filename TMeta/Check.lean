@@ -1,10 +1,10 @@
 module
 
-public meta import Staging.Code
+public meta import TMeta.Code
 
 open Lean Meta
 
-namespace Staging
+namespace TMeta
 
 meta section
 
@@ -112,14 +112,14 @@ partial def checkStage (e : Expr) (depth : Int) : CheckM Unit := do
       let some binderDepth ← binderDepth deBruijnIndex | return
       unless binderDepth = depth do
         let name ← binderName deBruijnIndex
-        throwError m!"invalid staging: bound variable `{name}` is available at stage \
+        throwError m!"stage mismatch: bound variable `{name}` is available at stage \
           {binderDepth}, but is used at stage {depth}"
   | .fvar fvarId =>
       unless depth = 0 do
-        throwError m!"invalid staging: local {mkFVar fvarId} is available at stage 0, \
+        throwError m!"stage mismatch: local {mkFVar fvarId} is available at stage 0, \
           but is used at stage {depth}"
   | .mvar mvarId =>
-      throwError m!"staging expression contains unresolved metavariable {mkMVar mvarId}"
+      throwError m!"staged term contains unresolved metavariable {mkMVar mvarId}"
   | .mdata _ body | .proj _ _ body =>
       checkStage body depth
   | .sort .. | .const .. | .lit .. =>
@@ -165,4 +165,4 @@ public def checkStages (e : Expr) : MetaM Unit :=
 
 end
 
-end Staging
+end TMeta

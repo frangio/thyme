@@ -1,17 +1,17 @@
 module
 
-public import Staging.Elab.Runtime
-public meta import Staging.Code
-public meta import Staging.Check
-public meta import Staging.TypedTransform
-public meta import Staging.Elab.Runtime
+public import TMeta.Elab.Runtime
+public meta import TMeta.Code
+public meta import TMeta.Check
+public meta import TMeta.TypedTransform
+public meta import TMeta.Elab.Runtime
 public meta import Lean.Elab.SyntheticMVars
 public meta import Lean.Elab.Term.TermElabM
 public meta import Lean.Meta.AppBuilder
 public meta import Lean.Meta.CollectFVars
 public meta import Lean.PrettyPrinter.Delaborator
 
-namespace Staging
+namespace TMeta
 
 public meta section
 
@@ -35,7 +35,7 @@ def moveLeft [Inhabited α] (z : Zipper α) : Zipper α where
 
 end Zipper
 
-open Lean Elab Term Meta Staging
+open Lean Elab Term Meta TMeta
 
 structure QuoteState where
   spliceGens : Array Expr
@@ -46,12 +46,12 @@ structure StageFrame where
   quote? : Option QuoteState := none
   deriving Inhabited
 
-structure StagingState where
+structure TransformState where
   frames : Zipper StageFrame
   depth : Int
   deriving Inhabited
 
-def StagingState.initial : StagingState where
+def TransformState.initial : TransformState where
   frames := {
     left := #[]
     current := {}
@@ -59,60 +59,60 @@ def StagingState.initial : StagingState where
   }
   depth := 0
 
-structure StagingContext where
+structure TransformContext where
   hFalse? : Option Expr
 
-abbrev StagingM := ReaderT StagingContext (StateT StagingState TermElabM)
+abbrev TransformM := ReaderT TransformContext (StateT TransformState TermElabM)
 
-instance : Inhabited (StagingM α) := ⟨throw default⟩
-instance : Nonempty (StagingM α) := ⟨throw default⟩
+instance : Inhabited (TransformM α) := ⟨throw default⟩
+instance : Nonempty (TransformM α) := ⟨throw default⟩
 
-def getFrame : StagingM StageFrame :=
-  return (← getThe StagingState).frames.current
+def getFrame : TransformM StageFrame :=
+  return (← getThe TransformState).frames.current
 
-def getDepth : StagingM Int :=
-  return (← getThe StagingState).depth
+def getDepth : TransformM Int :=
+  return (← getThe TransformState).depth
 
-def modifyFrame (f : StageFrame → StageFrame) : StagingM Unit :=
-  modifyThe StagingState fun s =>
+def modifyFrame (f : StageFrame → StageFrame) : TransformM Unit :=
+  modifyThe TransformState fun s =>
     { s with frames := { s.frames with current := f s.frames.current } }
 
-def modifyGetFrame (f : StageFrame → α × StageFrame) : StagingM α :=
-  modifyGetThe StagingState fun s =>
+def modifyGetFrame (f : StageFrame → α × StageFrame) : TransformM α :=
+  modifyGetThe TransformState fun s =>
     let (result, current) := f s.frames.current
     (result, { s with frames := { s.frames with current } })
 
-def withSuccFrame (k : StagingM α) : StagingM α := do
-  modifyThe StagingState fun s => { s with
+def withSuccFrame (k : TransformM α) : TransformM α := do
+  modifyThe TransformState fun s => { s with
     frames := s.frames.moveRight
     depth := s.depth + 1
   }
   let result ← k
-  modifyThe StagingState fun s => { s with
+  modifyThe TransformState fun s => { s with
     frames := s.frames.moveLeft
     depth := s.depth - 1
   }
   return result
 
-def withPredFrame (k : StagingM α) : StagingM α := do
-  modifyThe StagingState fun s => { s with
+def withPredFrame (k : TransformM α) : TransformM α := do
+  modifyThe TransformState fun s => { s with
     frames := s.frames.moveLeft
     depth := s.depth - 1
   }
   let result ← k
-  modifyThe StagingState fun s => { s with
+  modifyThe TransformState fun s => { s with
     frames := s.frames.moveRight
     depth := s.depth + 1
   }
   return result
 
-def withHFalse (k : Expr → StagingM α) : StagingM α :=
+def withHFalse (k : Expr → TransformM α) : TransformM α :=
   withLocalDeclD `_hFalse (mkConst ``False) fun hFalse =>
     withReader
       (fun ctx => { ctx with hFalse? := some hFalse })
       (k hFalse)
 
-def withQuote (k : StagingM α) : StagingM α := do
+def withQuote (k : TransformM α) : TransformM α := do
   let saved ← modifyGetFrame fun current =>
     (current.quote?, { current with
       quote? := some { spliceGens := #[], spliceHoles := #[] }
@@ -121,10 +121,10 @@ def withQuote (k : StagingM α) : StagingM α := do
   modifyFrame fun current => { current with quote? := saved }
   return result
 
-def getHFalse? : StagingM (Option Expr) :=
-  return (← readThe StagingContext).hFalse?
+def getHFalse? : TransformM (Option Expr) :=
+  return (← readThe TransformContext).hFalse?
 
-def withFVarAxioms (e : Expr) (k : Expr → StagingM α) : StagingM α :=
+def withFVarAxioms (e : Expr) (k : Expr → TransformM α) : TransformM α :=
   withoutModifyingEnv do
     let (_, used) ← e.collectFVars.run {}
     let used ← used.addDependencies
@@ -144,7 +144,7 @@ mutual
 partial def transform := Transform.transform getConstAppTransform?
 partial def transformAppArgs := Transform.transformAppArgs getConstAppTransform?
 
-partial def getConstAppTransform? (name : Name) : Option (ConstAppTransform StagingM) :=
+partial def getConstAppTransform? (name : Name) : Option (ConstAppTransform TransformM) :=
   if name == ``Code then
     some transformCode
   else if name == ``Code.quote then
@@ -155,7 +155,7 @@ partial def getConstAppTransform? (name : Name) : Option (ConstAppTransform Stag
     none
 
 partial def transformCode (mode : TypeMode) (fn : Expr) (args : Array Expr) :
-    StagingM mode.Result := do
+    TransformM mode.Result := do
   let .const _ [level] := fn | unreachable!
   unless args.size ≥ 1 do throwError "invalid Code application"
   let type := args[0]!
@@ -164,7 +164,7 @@ partial def transformCode (mode : TypeMode) (fn : Expr) (args : Array Expr) :
     (.sort (mkLevelMax' .one level)) #[] 1
 
 partial def transformQuote (mode : TypeMode) (quoteFn : Expr) (args : Array Expr) :
-    StagingM mode.Result := do
+    TransformM mode.Result := do
   let .const _ [level] := quoteFn | unreachable!
   unless args.size = 3 do throwError "invalid Code.quote application"
   let sourceBody := args[1]!
@@ -212,7 +212,7 @@ where
       return (gen, typeAbs, typeEnv)
 
 partial def transformSplice (mode : TypeMode) (spliceFn : Expr) (args : Array Expr) :
-    StagingM mode.Result := do
+    TransformM mode.Result := do
   let .const _ [level] := spliceFn | unreachable!
   unless args.size ≥ 2 do throwError "invalid Code.value application"
   let sourceBody := args[1]!
@@ -223,7 +223,7 @@ partial def transformSplice (mode : TypeMode) (spliceFn : Expr) (args : Array Ex
     transformAppArgs mode core.expr args core.typeAbs core.typeEnv 2
 where
   transformCore (mode : TypeMode) (level : Level) (sourceBody : Expr) :
-      StagingM mode.Result := do
+      TransformM mode.Result := do
     if (← getFrame).quote?.isSome then
       let (body, bodyType) ← transformBody sourceBody
       let type : Expr := match mode with
@@ -259,7 +259,7 @@ where
       let expr := mkApp2 (mkConst ``Code.value [level]) bodyType body
       return mode.mkResult expr type
 
-  transformBody (sourceBody : Expr) : StagingM (Expr × Expr) := do
+  transformBody (sourceBody : Expr) : TransformM (Expr × Expr) := do
     let body ← withPredFrame (transform .synth sourceBody)
     let (.app _ typeAbs, typeEnv) ←
       view (·.isAppOfArity ``Code 1) body.typeAbs body.typeEnv
@@ -269,9 +269,9 @@ where
 
 end
 
-public meta register_option staging.raw : Bool := {
+public meta register_option tmeta.raw : Bool := {
   defValue := false
-  descr := "elaborate staging syntax without compiling it"
+  descr := "elaborate TMeta syntax without compiling it"
 }
 
 public meta def withCodeReducible (k : TermElabM α) : TermElabM α := do
@@ -294,15 +294,15 @@ def ensureNoMVars (e : Expr) : TermElabM Unit := do
     let levelMVars := (collectLevelMVars {} e).result
     if ← logUnassignedLevelMVarsUsingErrorInfos levelMVars then
       throwAbortTerm
-    throwMVarError <| m!"staging expression contains unresolved metavariables\n\
+    throwMVarError <| m!"staged term contains unresolved metavariables\n\
       {MessageData.joinSep (mvars.toList.map MessageData.ofGoal) m!"\n\n"}"
 
-public meta def elabStagingTerm (stx : Syntax) (expectedType? : Option Expr) : TermElabM Expr := do
-  if staging.raw.get (← getOptions) then
+public meta def elabStagedTerm (stx : Syntax) (expectedType? : Option Expr) : TermElabM Expr := do
+  if tmeta.raw.get (← getOptions) then
     elabTermEnsuringType stx expectedType?
   else
     let raw ← withCodeReducible do
-      let raw ← withOptions (staging.raw.set · true) do
+      let raw ← withOptions (tmeta.raw.set · true) do
         elabTermEnsuringType stx expectedType?
       synthesizeSyntheticMVarsNoPostponing
       instantiateMVars raw
@@ -313,10 +313,10 @@ public meta def elabStagingTerm (stx : Syntax) (expectedType? : Option Expr) : T
       | none => inferType raw
     let lctx ← instantiateLCtxMVars (← getLCtx)
     let localInstances ← getLocalInstances
-    let ctx : StagingContext := {
+    let ctx : TransformContext := {
       hFalse? := none
     }
-    let state := StagingState.initial
+    let state := TransformState.initial
     let (result, _) ← withLCtx lctx localInstances <| withMCtx {} <| StateT.run
       ((transform (.expect expectedType #[]) raw) ctx) state
     ensureHasType expectedType? result
@@ -331,37 +331,37 @@ syntax:max (name := spliceStx) "~" term:max : term
 @[term_elab codeStx]
 meta def elabCode : TermElab := fun stx expectedType? => do
   let `(Code $type) := stx | throwUnsupportedSyntax
-  elabStagingTerm (← ``(Staging.Code $type)) expectedType?
+  elabStagedTerm (← ``(TMeta.Code $type)) expectedType?
 
 @[term_elab bareCodeStx]
 meta def elabBareCode : TermElab := fun stx expectedType? => do
-  elabTerm (mkIdentFrom stx ``Staging.Code) expectedType?
+  elabTerm (mkIdentFrom stx ``TMeta.Code) expectedType?
 
 @[term_elab quoteStx]
 meta def elabQuote : TermElab := fun stx expectedType? => do
   let `(`⟨$value⟩) := stx | throwUnsupportedSyntax
-  elabStagingTerm (← ``(Staging.Code.quote $value)) expectedType?
+  elabStagedTerm (← ``(TMeta.Code.quote $value)) expectedType?
 
 @[term_elab spliceStx]
 meta def elabSplice : TermElab := fun stx expectedType? => do
   let `(~$body) := stx | throwUnsupportedSyntax
-  elabStagingTerm (← ``(Staging.Code.value $body)) expectedType?
+  elabStagedTerm (← ``(TMeta.Code.value $body)) expectedType?
 
 open PrettyPrinter Delaborator
 open PrettyPrinter.Delaborator.SubExpr
 
-private def ppStagingNotation := `Staging.pp.stagingNotation
+private def ppSpliceNotation := `TMeta.pp.spliceNotation
 
-private def withStagingNotation (x : DelabM α) : DelabM α :=
-  withOptions (·.setBool ppStagingNotation true) x
+private def withSpliceNotation (x : DelabM α) : DelabM α :=
+  withOptions (·.setBool ppSpliceNotation true) x
 
-@[app_delab Staging.Code]
+@[app_delab TMeta.Code]
 meta def delabCode : Delab := do
   match (← getExpr).getAppNumArgs with
   | 0 =>
     `(Code)
   | 1 =>
-    let type ← withNaryArg 0 <| withStagingNotation delab
+    let type ← withNaryArg 0 <| withSpliceNotation delab
     `(Code $type)
   | _ =>
     failure
@@ -369,13 +369,13 @@ meta def delabCode : Delab := do
 @[app_delab Code.quote]
 meta def delabQuote : Delab :=
     whenNotPPOption getPPExplicit <| whenPPOption getPPNotation <| withOverApp 3 do
-  let value ← withNaryArg 1 <| withStagingNotation delab
+  let value ← withNaryArg 1 <| withSpliceNotation delab
   `(`⟨$value⟩)
 
 @[app_delab Code.value]
 meta def delabSplice : Delab :=
     whenNotPPOption getPPExplicit <| whenPPOption getPPNotation <| withOverApp 2 do
-  guard <| (← getOptions).getBool ppStagingNotation
+  guard <| (← getOptions).getBool ppSpliceNotation
   let body ← withNaryArg 1 delab
   `(~$body)
 
@@ -390,4 +390,4 @@ end
 
 end
 
-end Staging
+end TMeta

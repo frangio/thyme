@@ -1,4 +1,4 @@
-# Staging Rules
+# TMeta Rules
 
 ## Syntax
 

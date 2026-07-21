@@ -1,12 +1,12 @@
 module
 
-public import Staging.Codegen
+public import TMeta.Codegen
 public import Lean.EnvExtension
 import Lean.Meta.Eval
 
 open Lean Meta
 
-namespace Staging
+namespace TMeta
 
 public section
 
@@ -47,4 +47,4 @@ def instantiateQuoteTemplate (declName : Name) (index : Nat)
 
 end
 
-end Staging
+end TMeta

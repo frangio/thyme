@@ -1,9 +1,9 @@
 module
 
-import Staging.Code
-import Staging.Elab
+import TMeta.Code
+import TMeta.Elab
 
-open Staging
+open TMeta
 
 def idc (α : Code Type) (a : Code ~α) : Code ~α := a
 
@@ -76,7 +76,7 @@ def dependentArg (x : Code Nat) (h : Code (~x = 0)) : Code { n : Nat // n = 0 } 
 
 #guard_expr `⟨~(dependentArg `⟨0⟩ `⟨rfl⟩)⟩ =~ `⟨⟨0, rfl⟩⟩
 
-/-- error: invalid staging: bound variable `x` is available at stage -1, but is used at stage 0 -/
+/-- error: stage mismatch: bound variable `x` is available at stage -1, but is used at stage 0 -/
 #guard_msgs in
 #check ~(let x := 'c'; `⟨x⟩)
 

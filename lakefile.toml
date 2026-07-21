@@ -1,9 +1,9 @@
-name = "staging"
+name = "TMeta"
 version = "0.1.0"
-defaultTargets = ["Staging"]
+defaultTargets = ["TMeta"]
 
 [leanOptions]
 backward.do.legacy = true
 
 [[lean_lib]]
-name = "Staging"
+name = "TMeta"

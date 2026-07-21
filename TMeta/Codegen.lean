@@ -4,7 +4,7 @@ public import Lean.Meta.Basic
 
 open Lean Meta
 
-namespace Staging
+namespace TMeta
 
 public section
 
@@ -33,4 +33,4 @@ end ExfCodegen
 
 end
 
-end Staging
+end TMeta

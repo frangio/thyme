@@ -1,11 +1,11 @@
 module
 
-public import Staging.Codegen
+public import TMeta.Codegen
 public import Lean.Meta.Basic
 
 open Lean Meta
 
-namespace Staging
+namespace TMeta
 
 @[noinline]
 def forgeGet (h : False) : Unit → α :=
@@ -80,4 +80,4 @@ end Code
 
 end
 
-end Staging
+end TMeta

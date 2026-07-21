@@ -4,7 +4,7 @@ public import Lean.Meta.InferType
 
 open Lean Meta
 
-namespace Staging
+namespace TMeta
 
 public section
 
@@ -196,4 +196,4 @@ end Transform
 
 end
 
-end Staging
+end TMeta
