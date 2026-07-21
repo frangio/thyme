@@ -65,7 +65,6 @@ structure TransformContext where
 abbrev TransformM := ReaderT TransformContext (StateT TransformState TermElabM)
 
 instance : Inhabited (TransformM α) := ⟨throw default⟩
-instance : Nonempty (TransformM α) := ⟨throw default⟩
 
 def getFrame : TransformM StageFrame :=
   return (← getThe TransformState).frames.current
