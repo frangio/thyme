@@ -298,7 +298,7 @@ def ensureNoMVars (e : Expr) : TermElabM Unit := do
       {MessageData.joinSep (mvars.toList.map MessageData.ofGoal) m!"\n\n"}"
 
 public meta def elabStagedTerm (stx : Syntax) (expectedType? : Option Expr) : TermElabM Expr := do
-  if tmeta.raw.get (← getOptions) then
+  if ← tmeta.raw.getM then
     elabTermEnsuringType stx expectedType?
   else
     let expectedType ← expectedType?.getDM mkFreshTypeMVar
@@ -349,10 +349,13 @@ meta def elabSplice : TermElab := fun stx expectedType? => do
 open PrettyPrinter Delaborator
 open PrettyPrinter.Delaborator.SubExpr
 
-private def ppSpliceNotation := `TMeta.pp.spliceNotation
+register_option pp.spliceNotation : Bool := {
+  defValue := false
+  descr := "delaborate Code.value applications using splice notation"
+}
 
 private def withSpliceNotation (x : DelabM α) : DelabM α :=
-  withOptions (·.setBool ppSpliceNotation true) x
+  withOptions (pp.spliceNotation.set · true) x
 
 @[app_delab TMeta.Code]
 meta def delabCode : Delab := do
@@ -374,7 +377,7 @@ meta def delabQuote : Delab :=
 @[app_delab Code.value]
 meta def delabSplice : Delab :=
     whenNotPPOption getPPExplicit <| whenPPOption getPPNotation <| withOverApp 2 do
-  guard <| (← getOptions).getBool ppSpliceNotation
+  guard (← pp.spliceNotation.getM)
   let body ← withNaryArg 1 delab
   `(~$body)
 
