@@ -1,9 +1,13 @@
 name = "TMeta"
 version = "0.1.0"
 defaultTargets = ["TMeta"]
+testDriver = "TMetaTests"
 
 [leanOptions]
 backward.do.legacy = true
 
 [[lean_lib]]
 name = "TMeta"
+
+[[lean_lib]]
+name = "TMetaTests"
