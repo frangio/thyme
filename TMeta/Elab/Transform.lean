@@ -40,6 +40,7 @@ structure QuoteState where
 
 structure StageFrame where
   quote? : Option QuoteState := none
+  hFalse? : Option Expr := none
   deriving Inhabited
 
 structure TransformState where
@@ -55,10 +56,7 @@ def TransformState.initial : TransformState where
   }
   depth := 0
 
-structure TransformContext where
-  hFalse? : Option Expr
-
-abbrev TransformM := ReaderT TransformContext (StateT TransformState TermElabM)
+abbrev TransformM := StateT TransformState TermElabM
 
 instance : Inhabited (TransformM α) := ⟨throw default⟩
 
@@ -102,10 +100,12 @@ def withPredFrame (k : TransformM α) : TransformM α := do
   return result
 
 def withHFalse (k : Expr → TransformM α) : TransformM α :=
-  withLocalDeclD `_hFalse (mkConst ``False) fun hFalse =>
-    withReader
-      (fun ctx => { ctx with hFalse? := some hFalse })
-      (k hFalse)
+  withLocalDeclD `_hFalse (mkConst ``False) fun hFalse => do
+    let saved ← modifyGetFrame fun current =>
+      (current.hFalse?, { current with hFalse? := some hFalse })
+    let result ← k hFalse
+    modifyFrame fun current => { current with hFalse? := saved }
+    return result
 
 def withQuote (k : TransformM α) : TransformM α := do
   let saved ← modifyGetFrame fun current =>
@@ -117,7 +117,10 @@ def withQuote (k : TransformM α) : TransformM α := do
   return result
 
 def getHFalse? : TransformM (Option Expr) :=
-  return (← readThe TransformContext).hFalse?
+  return (← getFrame).hFalse?
+
+def getQuote? : TransformM (Option QuoteState) :=
+  return (← getFrame).quote?
 
 def withFVarAxioms (e : Expr) (k : Expr → TransformM α) : TransformM α :=
   withoutModifyingEnv do
@@ -219,8 +222,8 @@ partial def transformSplice (mode : TypeMode) (spliceFn : Expr) (args : Array Ex
 where
   transformCore (mode : TypeMode) (level : Level) (sourceBody : Expr) :
       TransformM mode.Result := do
-    if (← getFrame).quote?.isSome then
-      let (body, bodyType) ← transformBody sourceBody
+    if (← getQuote?).isSome then
+      let (body, bodyType) ← withPredFrame <| transformBody sourceBody
       let type : Expr := match mode with
         | .expect typeAbs typeEnv => instantiate typeAbs typeEnv
         | .synth => bodyType
@@ -236,7 +239,7 @@ where
       }
       return mode.mkResult hole type
     else if (← getDepth) ≤ 0 then
-      withHFalse fun hFalse => do
+      withPredFrame <| withHFalse fun hFalse => do
         let (body, bodyType) ← transformBody sourceBody
         let type : Expr := match mode with
           | .expect typeAbs typeEnv => instantiate typeAbs typeEnv
@@ -247,7 +250,7 @@ where
         let expr ← withFVarAxioms gen (liftM ∘ evalCodegen)
         return mode.mkResult expr type
     else
-      let (body, bodyType) ← transformBody sourceBody
+      let (body, bodyType) ← withPredFrame <| transformBody sourceBody
       let type : Expr := match mode with
         | .expect typeAbs typeEnv => instantiate typeAbs typeEnv
         | .synth => bodyType
@@ -255,7 +258,7 @@ where
       return mode.mkResult expr type
 
   transformBody (sourceBody : Expr) : TransformM (Expr × Expr) := do
-    let body ← withPredFrame (transform .synth sourceBody)
+    let body ← transform .synth sourceBody
     let (.app _ typeAbs, typeEnv) ←
       view (·.isAppOfArity ``Code 1) body.typeAbs body.typeEnv
       | throwError "Code expected"

@@ -56,12 +56,9 @@ def elabStagedTerm (stx : Syntax) (expectedType? : Option Expr) : TermElabM Expr
     checkStages raw
     let lctx ← instantiateLCtxMVars (← getLCtx)
     let localInstances ← getLocalInstances
-    let ctx : TransformContext := {
-      hFalse? := none
-    }
     let state := TransformState.initial
     let (result, _) ← withLCtx lctx localInstances <| withMCtx {} <| StateT.run
-      ((transform (.expect expectedType #[]) raw) ctx) state
+      (transform (.expect expectedType #[]) raw) state
     ensureHasType expectedType? result
 
 public section
