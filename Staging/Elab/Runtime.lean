@@ -1,13 +1,21 @@
 module
 
+public import Staging.Codegen
 public import Lean.EnvExtension
-public import Lean.Meta.Basic
+import Lean.Meta.Eval
 
 open Lean Meta
 
 namespace Staging
 
 public section
+
+private unsafe def evalCodegenImpl (gen : Expr) : Codegen := do
+  let result ← evalExpr Codegen (mkConst ``Codegen) gen
+  result
+
+@[implemented_by evalCodegenImpl]
+opaque evalCodegen (gen : Expr) : Codegen
 
 structure QuoteTemplate where
   mctx : MetavarContext
