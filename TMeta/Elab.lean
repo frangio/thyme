@@ -301,16 +301,15 @@ public meta def elabStagedTerm (stx : Syntax) (expectedType? : Option Expr) : Te
   if tmeta.raw.get (← getOptions) then
     elabTermEnsuringType stx expectedType?
   else
-    let raw ← withCodeReducible do
-      let raw ← withOptions (tmeta.raw.set · true) do
-        elabTermEnsuringType stx expectedType?
-      synthesizeSyntheticMVarsNoPostponing
-      instantiateMVars raw
+    let expectedType ← expectedType?.getDM mkFreshTypeMVar
+    let raw ← withCodeReducible <|
+      withOptions (tmeta.raw.set · true) <|
+        instantiateMVars <=< withSynthesize <|
+          elabTermEnsuringType stx (some expectedType)
+    let expectedType ← instantiateMVars expectedType
     ensureNoMVars raw
+    ensureNoMVars expectedType
     checkStages raw
-    let expectedType ← match expectedType? with
-      | some expectedType => instantiateMVars expectedType
-      | none => inferType raw
     let lctx ← instantiateLCtxMVars (← getLCtx)
     let localInstances ← getLocalInstances
     let ctx : TransformContext := {
