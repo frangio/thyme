@@ -8,12 +8,13 @@ open Lean Meta
 namespace Staging
 
 @[noinline]
-def elimThunk (h : False) : Unit → α :=
+def forgeGet (h : False) : Unit → α :=
   fun _ => h.elim
 
 public section
 
 structure Code (α : Sort u) : Sort (max 1 u) where
+  mk! ::
   get : Unit → α
   xfc : ExfCodegen
 
@@ -28,14 +29,14 @@ def value (code : Code α) : α :=
 
 @[expose, macro_inline]
 def quote (value : α) (xfc : ExfCodegen := .default) : Code α :=
-  mk (fun _ => value) xfc.squash
+  mk! (fun _ => value) xfc.squash
 
 unif_hint (code : Code (Sort u)) (α : Sort u) where
   code ≟ quote α
   ⊢ code.get () ≟ α
 
 def forge (h : False) (gen : Codegen) : Code α :=
-  mk (elimThunk h) (.squash fun _ => gen)
+  mk! (forgeGet h) (.squash fun _ => gen)
 
 @[simp]
 theorem value_quote (a : α) (xfc : ExfCodegen := .default) :
@@ -62,6 +63,18 @@ theorem funext
     f = g := by
   funext x
   rw [← quote_value x, h]
+
+@[coe]
+def coe [ToExpr α] (a : α) : Code α :=
+  Code.mk! (fun _ => a) (.squash fun _ => pure (toExpr a))
+
+instance [ToExpr α] : Coe α (Code α) where
+  coe := coe
+
+@[simp]
+theorem coe_eq_quote [ToExpr α] (a : α) :
+    coe a = quote a := by
+  rfl
 
 end Code
 

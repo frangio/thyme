@@ -79,3 +79,6 @@ def dependentArg (x : Code Nat) (h : Code (~x = 0)) : Code { n : Nat // n = 0 } 
 /-- error: invalid staging: bound variable `x` is available at stage -1, but is used at stage 0 -/
 #guard_msgs in
 #check ~(let x := 'c'; `⟨x⟩)
+
+variable (n : Nat) in
+#check_simp (`⟨~↑n⟩ : Code Nat).value ~> n
