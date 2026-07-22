@@ -6,7 +6,7 @@ import Lean.Meta.Eval
 
 open Lean Meta
 
-namespace TMeta
+namespace TMeta.Elab
 
 public section
 
@@ -57,4 +57,4 @@ def instantiateQuoteTemplate (declName : Name) (index : Nat)
 
 end
 
-end TMeta
+end TMeta.Elab

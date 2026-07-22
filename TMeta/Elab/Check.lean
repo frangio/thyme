@@ -4,7 +4,7 @@ public meta import TMeta.Code
 
 open Lean Meta
 
-namespace TMeta
+namespace TMeta.Elab
 
 meta section
 
@@ -169,4 +169,4 @@ public def checkStages (e : Expr) : MetaM Unit :=
 
 end
 
-end TMeta
+end TMeta.Elab

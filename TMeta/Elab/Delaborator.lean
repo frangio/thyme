@@ -4,7 +4,7 @@ public import TMeta.Elab.Term
 public meta import TMeta.Code
 public meta import Lean.PrettyPrinter.Delaborator
 
-namespace TMeta
+namespace TMeta.Elab
 
 public meta section
 
@@ -52,4 +52,4 @@ meta def delabExfCodegenDefault : Delab := `(⋯)
 
 end
 
-end TMeta
+end TMeta.Elab

@@ -6,7 +6,7 @@ public meta import TMeta.Elab.Transform
 public meta import Lean.Elab.SyntheticMVars
 public meta import Lean.Elab.Term.TermElabM
 
-namespace TMeta
+namespace TMeta.Elab
 
 meta section
 
@@ -85,4 +85,4 @@ end
 
 end
 
-end TMeta
+end TMeta.Elab
