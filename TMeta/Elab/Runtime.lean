@@ -25,12 +25,26 @@ structure QuoteTemplate where
 initialize quoteTemplatesExt : MapDeclarationExtension (Array QuoteTemplate) ←
   mkMapDeclarationExtension (asyncMode := .local)
 
-def registerQuoteTemplate [Monad m] [MonadEnv m]
-    (declName : Name) (quote : QuoteTemplate) : m Nat := do
+namespace QuoteTemplate
+
+def register [Monad m] [MonadEnv m]
+    (quote : QuoteTemplate) (declName : Name) : m Nat := do
   let quotes := quoteTemplatesExt.find? (← getEnv) declName |>.getD #[]
   let index := quotes.size
   modifyEnv fun env => quoteTemplatesExt.insert env declName (quotes.push quote)
   return index
+
+def withInstantiate (template : QuoteTemplate)
+    (splices : Array β) (value : β → MetaM Expr)
+    (k : MetaM α) : MetaM α := do
+  unless template.spliceHoles.size = splices.size do
+    throwError "staged quote expected {template.spliceHoles.size} splices, got {splices.size}"
+  withMCtx template.mctx do
+    for (hole, splice) in template.spliceHoles.zip splices do
+      hole.assign (← value splice)
+    k
+
+end QuoteTemplate
 
 def instantiateQuoteTemplate (declName : Name) (index : Nat)
     (spliceGens : Array (MetaM Expr)) : MetaM Expr := do
@@ -38,11 +52,7 @@ def instantiateQuoteTemplate (declName : Name) (index : Nat)
     | throwError "no staged quotes have been registered for declaration `{.ofConstName declName}`"
   let some quote := quotes[index]?
     | throwError "invalid staged quote index {index} for declaration `{.ofConstName declName}`"
-  unless quote.spliceHoles.size = spliceGens.size do
-    throwError "staged quote expected {quote.spliceHoles.size} generators, got {spliceGens.size}"
-  withMCtx quote.mctx do
-    for (hole, spliceGen) in quote.spliceHoles.zip spliceGens do
-      hole.assign (← spliceGen)
+  quote.withInstantiate spliceGens id <|
     instantiateMVars quote.body
 
 end

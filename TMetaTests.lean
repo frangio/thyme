@@ -103,3 +103,10 @@ def dependentArg (x : Code Nat) (h : Code (~x = 0)) : Code { n : Nat // n = 0 } 
 
 variable (n : Nat) in
 #check_simp (`⟨~↑n⟩ : Code Nat).value ~> n
+
+#guard_staged ~(~(`⟨`⟨1⟩⟩ : Code (Code Nat))) =ₛ 1
+
+def nestedValue (x : Code (Code Nat)) : Code (Code Nat) :=
+  `⟨`⟨~~x⟩⟩
+
+#guard_staged ~(nestedValue `⟨`⟨1⟩⟩) =~ `⟨1⟩
