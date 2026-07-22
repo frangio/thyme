@@ -69,3 +69,17 @@ theorem exp3.eq_staged : exp3 = exp3.staged :=
 ```
 
 Note that one definition uses staging syntax while the other uses the staging primitives as functions. The former not only ensures coherence but also performs a stage checking validation that rejects invalid cross-stage references, as a prerequisite to turning a staged expression into a code generator. As an example, `` `⟨fun x => ~x⟩ `` is not a valid staged program, because `x` is bound inside a quotation and dereferenced in a splice that escapes it. In `exp3`, we want to opt out of stage checking and do not care about coherence (`.quote x : Code Nat` isn't), as they are not relevant for and may get in the way of reasoning.
+
+## Design and implementation
+
+TMeta is based on András Kovács's [*Staged Compilation with Two-Level Type Theory*](https://dl.acm.org/doi/10.1145/3547641), extended to arbitrarily nested stages. Unlike the calculus presented there, TMeta uses Lean's ordinary universes at every stage. Of the two inverse laws, only `` ~`⟨e⟩ = e `` holds definitionally, while `` `⟨~c⟩ = c `` holds propositionally.
+
+The definition of `Code` is basically:
+
+```lean
+structure Code (α : Sort u) : Sort (max 1 u) where
+  get : Unit → α
+  xfc : False → MetaM Expr
+```
+
+`xfc` stands for *ex falso code generator*. Recall that quotations may be nested and that inner quotations may refer to variables bound in enclosing ones. During code generation, these variables are available as syntax, but not as values of their Lean types. The transformation must nevertheless construct `Code α` terms for nested quotations, since they may be passed to ordinary functions. Under a local assumption of `False`, it therefore supplies the denotational component by ex falso. The `get` field is thunked so that this placeholder is never evaluated merely by constructing the `Code` term. Crucially, no proof of `False` appears in kernel-facing terms, and this mechanism introduces no additional axioms.
