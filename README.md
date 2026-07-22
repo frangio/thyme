@@ -2,11 +2,11 @@
 
 TMeta is an experimental Lean library for type-safe staged programming, supporting dependent types and reasoning about metaprograms.
 
-In TMeta, a metaprogram for constructing a Lean expression of type `⍺` is a term of type `Code ⍺`, simultaneously carrying a code generator and a denotation of type `⍺`.
+In TMeta, a metaprogram for constructing a Lean expression of type `α : Sort u` is a term of type `Code α`, simultaneously carrying a code generator and a denotation of type `α`.
 
 ```lean
-Code.gen {⍺ : Sort u} : Code ⍺ → MetaM Expr
-Code.val {⍺ : Sort u} : Code ⍺ → ⍺
+Code.gen : Code α → MetaM Expr
+Code.val : Code α → α
 ```
 
 A metaprogram built with TMeta's staging primitives is coherent: the expression produced by its code generator is definitionally equal to its denotation.
