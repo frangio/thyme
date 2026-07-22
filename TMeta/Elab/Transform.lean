@@ -52,9 +52,9 @@ def gen : SpliceCapture → Expr
   | { level, bodyType, body } =>
     mkApp2 (mkConst ``Code.gen [level]) bodyType body
 
-def value : SpliceCapture → Expr
+def val : SpliceCapture → Expr
   | { level, bodyType, body } =>
-    mkApp2 (mkConst ``Code.value [level]) bodyType body
+    mkApp2 (mkConst ``Code.val [level]) bodyType body
 
 end SpliceCapture
 
@@ -192,7 +192,7 @@ partial def getConstAppTransform? (name : Name) : Option (ConstAppTransform Tran
     some transformCode
   else if name == ``Code.quote then
     some transformQuote
-  else if name == ``Code.value then
+  else if name == ``Code.val then
     some transformSplice
   else
     none
@@ -240,7 +240,7 @@ partial def transformQuote (mode : TypeMode) (quoteFn : Expr) (args : Array Expr
         withSuccFrame <| transformBody .synth sourceBody
       let quote := body.val
       let gen ← quote.gen
-      quote.template.withInstantiate quote.splices (pure ·.value) do
+      quote.template.withInstantiate quote.splices (pure ·.val) do
         let value ← instantiateMVars quote.template.body
         let type ← instantiateMVars body.type
         let xfc ← mkLambdaFVars #[hFalse] gen
@@ -269,7 +269,7 @@ where
 partial def transformSplice (mode : TypeMode) (spliceFn : Expr) (args : Array Expr) :
     TransformM (mode.Result Expr) := do
   let .const _ [level] := spliceFn | unreachable!
-  unless args.size ≥ 2 do throwError "invalid Code.value application"
+  unless args.size ≥ 2 do throwError "invalid Code.val application"
   let sourceBody := args[1]!
   if args.size = 2 then
     transformCore mode level sourceBody
@@ -300,7 +300,7 @@ where
         return .mk expr bodyType
     else
       let (body, bodyType) ← withPredFrame <| transformBody sourceBody
-      let expr := mkApp2 (mkConst ``Code.value [level]) bodyType body
+      let expr := mkApp2 (mkConst ``Code.val [level]) bodyType body
       return .mk expr bodyType
 
   transformBody (sourceBody : Expr) : TransformM (Expr × Expr) := do

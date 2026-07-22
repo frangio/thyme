@@ -43,7 +43,7 @@ def exp (n : Nat) (x : Code Nat) : Code Nat :=
 
 #guard_staged fun x => ~(exp 3 `⟨x⟩) =ₛ fun x => 1 * x * x * x
 
-theorem exp_eq_pow (n : Nat) (x : Code Nat) : (exp n x).value = x.value ^ n := by
+theorem exp_eq_pow (n : Nat) (x : Code Nat) : (exp n x).val = x.val ^ n := by
   unfold exp
   induction n with
   | zero => rfl
@@ -102,7 +102,7 @@ def dependentArg (x : Code Nat) (h : Code (~x = 0)) : Code { n : Nat // n = 0 } 
 #check ~(let x := 'c'; `⟨x⟩)
 
 variable (n : Nat) in
-#check_simp (`⟨~↑n⟩ : Code Nat).value ~> n
+#check_simp (`⟨~↑n⟩ : Code Nat).val ~> n
 
 #guard_staged ~(~(`⟨`⟨1⟩⟩ : Code (Code Nat))) =ₛ 1
 

@@ -19,14 +19,14 @@ public meta register_option tmeta.raw : Bool := {
 
 def withCodeReducible (k : TermElabM α) : TermElabM α := do
   let quoteStatus ← getReducibilityStatus ``Code.quote
-  let valueStatus ← getReducibilityStatus ``Code.value
+  let valStatus ← getReducibilityStatus ``Code.val
   try
     setReducibilityStatus ``Code.quote .reducible
-    setReducibilityStatus ``Code.value .reducible
+    setReducibilityStatus ``Code.val .reducible
     k
   finally
     setReducibilityStatus ``Code.quote quoteStatus
-    setReducibilityStatus ``Code.value valueStatus
+    setReducibilityStatus ``Code.val valStatus
 
 def ensureNoMVars (e : Expr) : TermElabM Unit := do
   if e.hasMVar then
@@ -79,7 +79,7 @@ meta def elabQuote : TermElab := fun stx expectedType? => do
 @[term_elab spliceStx]
 meta def elabSplice : TermElab := fun stx expectedType? => do
   let `(~$body) := stx | throwUnsupportedSyntax
-  elabStagedTerm (← ``(TMeta.Code.value $body)) expectedType?
+  elabStagedTerm (← ``(TMeta.Code.val $body)) expectedType?
 
 end
 

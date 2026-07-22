@@ -24,7 +24,7 @@ def gen (code : Code α) : Codegen :=
   code.xfc.run
 
 @[expose]
-def value (code : Code α) : α :=
+def val (code : Code α) : α :=
   code.get ()
 
 @[expose, macro_inline]
@@ -39,21 +39,21 @@ def forge (h : False) (gen : Codegen) : Code α :=
   mk! (forgeGet h) (.squash fun _ => gen)
 
 @[simp]
-theorem value_quote (a : α) (xfc : ExfCodegen := .default) :
-    (quote a xfc).value = a :=
+theorem val_quote (a : α) (xfc : ExfCodegen := .default) :
+    (quote a xfc).val = a :=
   rfl
 
 @[simp]
-theorem quote_value (a : Code α) (xfc : ExfCodegen := .default) :
-    quote a.value xfc = a := by
+theorem quote_val (a : Code α) (xfc : ExfCodegen := .default) :
+    quote a.val xfc = a := by
   simp [quote]
   congr
   funext _
   nofun
 
 @[ext]
-theorem ext {a b : Code α} (h : a.value = b.value) : a = b := by
-  rw [← quote_value a, ← quote_value b, h]
+theorem ext {a b : Code α} (h : a.val = b.val) : a = b := by
+  rw [← quote_val a, ← quote_val b, h]
 
 @[ext]
 theorem funext
@@ -62,7 +62,7 @@ theorem funext
     (h : ∀ (a : α), f (quote a) = g (quote a)) :
     f = g := by
   funext x
-  rw [← quote_value x, h]
+  rw [← quote_val x, h]
 
 @[coe]
 def coe [ToExpr α] (a : α) : Code α :=

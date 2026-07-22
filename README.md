@@ -6,7 +6,7 @@ In TMeta, a metaprogram for constructing a Lean expression of type `⍺` is a te
 
 ```lean
 Code.gen {⍺ : Sort u} : Code ⍺ → MetaM Expr
-Code.value {⍺ : Sort u} : Code ⍺ → ⍺
+Code.val {⍺ : Sort u} : Code ⍺ → ⍺
 ```
 
 A metaprogram built with TMeta's staging primitives is coherent: the expression produced by its code generator is definitionally equal to its denotation.
@@ -14,11 +14,11 @@ A metaprogram built with TMeta's staging primitives is coherent: the expression 
 The staging primitives are quotation and splicing. A quotation `` `⟨e⟩ `` builds a metaprogram of type `Code α` from an expression `e : α`. A splice `~c` allows a metaprogram `c : Code α` to be used as an expression of type `α`.
 
 ```lean
-e : ⍺       ⊢ `⟨e⟩ : Code ⍺
-c : Code ⍺  ⊢ ~c : ⍺
+e : α       ⊢ `⟨e⟩ : Code α
+c : Code α  ⊢  ~c  : α
 ```
 
-A splice `~c` is denotationally `c.value`. Operationally, outside a quotation, `c`'s generator is evaluated during elaboration and its result replaces the splice. Inside a quotation, `c`'s generator is instead incorporated into the quotation's generator.
+A splice `~c` is denotationally `c.val`. Operationally, outside a quotation, `c`'s generator is evaluated during elaboration and its result replaces the splice. Inside a quotation, `c`'s generator is instead incorporated into that quotation's generator.
 
 For example, we can implement exponentiation as a staged program that specializes a statically known exponent:
 
@@ -46,7 +46,7 @@ We can reason about `exp` in terms of its denotation:
 
 ```lean
 theorem exp_eq_pow (n : Nat) (x : Code Nat) :
-    (exp n x).value = x.value ^ n := by
+    (exp n x).val = x.val ^ n := by
   induction n with
   | zero => rfl
   | succ n ih => simp [Nat.pow_succ, exp, ih]
@@ -58,7 +58,7 @@ We can conveniently make use of coherence in a `@[csimp]` theorem to retain a co
 
 ```lean
 def exp3 (x : Nat) : Nat :=
-  (exp 3 (.quote x)).value
+  (exp 3 (.quote x)).val
 
 def exp3.staged (x : Nat) : Nat :=
   ~(exp 3 `⟨x⟩)

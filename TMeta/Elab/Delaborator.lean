@@ -13,7 +13,7 @@ open PrettyPrinter.Delaborator.SubExpr
 
 register_option pp.spliceNotation : Bool := {
   defValue := false
-  descr := "delaborate Code.value applications using splice notation"
+  descr := "delaborate Code.val applications using splice notation"
 }
 
 private def withSpliceNotation (x : DelabM α) : DelabM α :=
@@ -36,7 +36,7 @@ meta def delabQuote : Delab :=
   let value ← withNaryArg 1 <| withSpliceNotation delab
   `(`⟨$value⟩)
 
-@[app_delab Code.value]
+@[app_delab Code.val]
 meta def delabSplice : Delab :=
     whenNotPPOption getPPExplicit <| whenPPOption getPPNotation <| withOverApp 2 do
   guard (← pp.spliceNotation.getM)
