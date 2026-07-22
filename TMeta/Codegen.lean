@@ -27,7 +27,8 @@ private def squashImpl (xfc : ExfCodegen) : ExfCodegen :=
 def squash (xfc : ExfCodegen) : ExfCodegen :=
   False.elim
 
-def default : ExfCodegen := False.elim
+def default : ExfCodegen :=
+  .squash fun _ => throwError "missing code generator"
 
 end ExfCodegen
 

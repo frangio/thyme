@@ -110,3 +110,8 @@ def nestedValue (x : Code (Code Nat)) : Code (Code Nat) :=
   `⟨`⟨~~x⟩⟩
 
 #guard_staged ~(nestedValue `⟨`⟨1⟩⟩) =~ `⟨1⟩
+
+def rawQuote (n : Nat) : Code Nat := .quote n
+/-- error: missing code generator -/
+#guard_msgs in
+#check ~(rawQuote 1 : Code Nat)
