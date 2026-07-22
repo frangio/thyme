@@ -18,7 +18,7 @@ e : α       ⊢ `⟨e⟩ : Code α
 c : Code α  ⊢  ~c  : α
 ```
 
-A splice `~c` is denotationally `c.val`. Operationally, outside a quotation, `c`'s generator is evaluated during elaboration and its result replaces the splice. Inside a quotation, `c`'s generator is instead incorporated into that quotation's generator.
+A splice `~c` is denotationally `c.val`. Operationally, when used at the outermost stage, `c`'s generator is evaluated during elaboration and its result replaces the splice. Inside a quotation, `c`'s generator is instead incorporated into that quotation's generator.
 
 For example, we can implement exponentiation as a staged program that specializes a statically known exponent:
 
@@ -54,7 +54,7 @@ theorem exp_eq_pow (n : Nat) (x : Code Nat) :
 
 By coherence, theorems about the denotation of metaprograms produced by `exp` transfer to their generated code.
 
-We can conveniently make use of coherence in a `@[csimp]` theorem to retain a compositional definition for proofs while directing the compiler to use an efficient generated implementation for compiled execution:
+We can conveniently make use of coherence in a `@[csimp]` theorem to retain a definition that is easy to reason about while directing the compiler to use an efficient generated implementation:
 
 ```lean
 def exp3 (x : Nat) : Nat :=
@@ -68,7 +68,7 @@ theorem exp3.eq_staged : exp3 = exp3.staged :=
   rfl
 ```
 
-Note that one definition uses staging syntax while the other uses the staging primitives as functions. The former not only ensures coherence but also performs a stage checking validation that rejects invalid cross-stage references, as a prerequisite to turning a staged expression into a code generator. As an example, `` `⟨fun x => ~x⟩ `` is not a valid staged program, because `x` is bound inside a quotation and dereferenced in a splice that escapes it. In `exp3`, we want to opt out of stage checking and do not care about coherence (`.quote x : Code Nat` isn't), as they are not relevant for and may get in the way of reasoning.
+The definition `exp3.staged` uses staging syntax, whereas `exp3` uses the staging primitives as functions. Staging syntax invokes TMeta's elaborator, which maintains coherence, evaluates outermost splices, and rejects  cross-stage references. For example, `` `⟨fun x => ~x⟩ `` is rejected because `x` is bound inside a quotation but dereferenced by a splice that escapes it. The denotational definition `exp3` deliberately opts out of this processing, as it is not relevant for reasoning.
 
 ## Design and implementation
 
