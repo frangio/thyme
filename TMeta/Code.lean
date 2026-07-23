@@ -7,10 +7,6 @@ open Lean Meta
 
 namespace TMeta
 
-@[noinline]
-def forgeGet (h : False) : Unit → α :=
-  fun _ => h.elim
-
 public section
 
 structure Code (α : Sort u) : Sort (max 1 u) where
@@ -35,6 +31,11 @@ unif_hint (code : Code (Sort u)) (α : Sort u) where
   code ≟ quote α
   ⊢ code.get () ≟ α
 
+@[noinline]
+def forgeGet (h : False) : Unit → α :=
+  fun _ => h.elim
+
+@[expose]
 def forge (h : False) (gen : Codegen) : Code α :=
   mk! (forgeGet h) (.squash fun _ => gen)
 
