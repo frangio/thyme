@@ -2,14 +2,14 @@
 
 TMeta is an experimental Lean library for type-safe staged programming, supporting dependent types and reasoning about metaprograms.
 
-In TMeta, a metaprogram for constructing a Lean expression of type `α : Sort u` is a term of type `Code α`, simultaneously carrying a code generator and a denotation of type `α`.
+In TMeta, a term of type `Code α` is a metaprogram for constructing a Lean expression of type `α`, simultaneously carrying a code generator and a denotation:
 
 ```lean
 Code.gen : Code α → MetaM Expr
 Code.val : Code α → α
 ```
 
-A metaprogram built with TMeta's staging primitives is coherent: the expression produced by its code generator is definitionally equal to its denotation.
+A metaprogram built with TMeta's staging primitives is *coherent*: the expression produced by its code generator is definitionally equal to its denotation.
 
 The staging primitives are quotation and splicing. A quotation `` `⟨e⟩ `` builds a metaprogram of type `Code α` from an expression `e : α`. A splice `~c` allows a metaprogram `c : Code α` to be used as an expression of type `α`.
 
@@ -54,7 +54,7 @@ theorem exp_eq_pow (n : Nat) (x : Code Nat) :
 
 By coherence, theorems about the denotation of metaprograms produced by `exp` transfer to their generated code.
 
-We can conveniently make use of coherence in a `@[csimp]` theorem to retain a definition that is easy to reason about while directing the compiler to use an efficient generated implementation:
+Alternatively, we can retain the denotation of the staged term as the definition that is convenient to reason about, and prove coherence as a `@[csimp]` theorem to direct the compiler to use the more efficient generated code:
 
 ```lean
 def exp3 (x : Nat) : Nat :=
