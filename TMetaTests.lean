@@ -128,3 +128,16 @@ def rawQuote (n : Nat) : Code Nat := .quote n
 /-- error: missing code generator -/
 #guard_msgs in
 #check ~(rawQuote 1 : Code Nat)
+
+#guard_staged ~(importedSucc `⟨41⟩) =ₛ 41 + 1
+
+/-- error: generated code is not definitionally equal to its denotation
+generated:
+  41 + 1
+denotation:
+  (opaqueImportedSucc («Code».quote 41)).val
+
+Note: The following definitions were not unfolded because their definition is not exposed:
+  opaqueImportedSucc ↦ 1 -/
+#guard_msgs in
+#check ~(opaqueImportedSucc `⟨41⟩)

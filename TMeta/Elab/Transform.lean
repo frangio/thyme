@@ -6,6 +6,7 @@ public meta import TMeta.Elab.OpTransform
 public meta import TMeta.Elab.Runtime
 public meta import Lean.Elab.Term.TermElabM
 public meta import Lean.Meta.AppBuilder
+public meta import Lean.Meta.Check
 public meta import Lean.Meta.Eval
 
 namespace TMeta.Elab
@@ -215,9 +216,10 @@ partial def transformSplice (spliceFn : Expr) (args : Vector Expr 2) : Transform
     if ← tmeta.checkCoherence.getM then
       let denotation := mkApp2 spliceFn type sourceBody
       unless ← withNewMCtxDepth <| isDefEqGuarded result denotation do
+        let note ← withNewMCtxDepth <| mkUnfoldAxiomsNote result denotation
         throwError m!"generated code is not definitionally equal to its denotation\n\
           generated:{indentExpr result}\n\
-          denotation:{indentExpr denotation}"
+          denotation:{indentExpr denotation}{note}"
     return result
   else
     return mkApp2 (mkConst ``Code.val [level]) type body
