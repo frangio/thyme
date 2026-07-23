@@ -34,6 +34,11 @@ end Zipper
 
 open Lean Elab Term Meta
 
+public meta register_option tmeta.checkCoherence : Bool := {
+  defValue := false
+  descr := "check that generated code is definitionally equal to its denotation"
+}
+
 def mkArrayLitOf (type : Expr) (xs : Array α) (f : α → Expr) : MetaM Expr := do
   let u ← getDecLevel type
   let nil := mkApp (mkConst ``List.nil [u]) type
@@ -270,14 +275,15 @@ partial def transformSplice (mode : TypeMode) (spliceFn : Expr) (args : Array Ex
     TransformM (mode.Result Expr) := do
   let .const _ [level] := spliceFn | unreachable!
   unless args.size ≥ 2 do throwError "invalid Code.val application"
+  let sourceType := args[0]!
   let sourceBody := args[1]!
   if args.size = 2 then
-    transformCore mode level sourceBody
+    transformCore mode level sourceType sourceBody
   else
-    let core ← transformCore .synth level sourceBody
+    let core ← transformCore .synth level sourceType sourceBody
     transformAppArgs mode core.val args core.typeAbs core.typeEnv 2
 where
-  transformCore (mode : TypeMode) (level : Level) (sourceBody : Expr) :
+  transformCore (mode : TypeMode) (level : Level) (sourceType sourceBody : Expr) :
       TransformM (mode.Result Expr) := do
     if (← getQuote?).isSome then
       let (body, bodyType) ← withPredFrame <| transformBody sourceBody
@@ -291,13 +297,21 @@ where
       }
       return .mk hole bodyType
     else if (← getStage) ≤ 0 then
-      withPredFrame <| withHFalse fun hFalse => do
+      let result ← withPredFrame <| withHFalse fun hFalse => do
         let (body, bodyType) ← transformBody sourceBody
         let gen := mkApp2 (mkConst ``Code.gen [level]) bodyType body
         let xfc ← mkLambdaFVars #[hFalse] gen
         let gen := mkApp (mkConst ``ExfCodegen.run) xfc
         let expr ← withFVarAxioms gen (liftM ∘ evalCodegen)
         return .mk expr bodyType
+      if ← tmeta.checkCoherence.getM then
+        if (← getHFalse?).isNone then
+          let denotation := mkApp2 spliceFn sourceType sourceBody
+          unless ← withNewMCtxDepth <| isDefEqGuarded result.val denotation do
+            throwError m!"generated code is not definitionally equal to its denotation\n\
+              generated:{indentExpr result.val}\n\
+              denotation:{indentExpr denotation}"
+      return result
     else
       let (body, bodyType) ← withPredFrame <| transformBody sourceBody
       let expr := mkApp2 (mkConst ``Code.val [level]) bodyType body

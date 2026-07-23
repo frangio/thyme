@@ -8,6 +8,8 @@ open Lean Elab Command Term Meta
 open Lean.Parser Lean.Parser.Tactic Lean.Parser.Command
 open Lean.Elab.Tactic.GuardExpr
 
+set_option tmeta.checkCoherence true
+
 public section
 
 /-- Variant of `#guard_expr` that prints elaborated terms on error. -/
