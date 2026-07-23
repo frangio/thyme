@@ -129,6 +129,22 @@ def rawQuote (n : Nat) : Code Nat := .quote n
 #guard_msgs in
 #check ~(rawQuote 1 : Code Nat)
 
+#guard_staged ~(~(~(`⟨`⟨`⟨7⟩⟩⟩ : Code (Code (Code Nat))))) =ₛ 7
+
+universe u
+
+def stagedId (α : Code (Sort u)) : Code (~α → ~α) :=
+  `⟨fun x => x⟩
+
+#guard_staged ~(`⟨Nat⟩ : Code Type) =ₛ Nat
+
+#guard_staged ~(`⟨Type⟩ : Code (Type 1)) =ₛ Type
+
+def finType (n : Code Nat) : Code Type :=
+  `⟨Fin ~n⟩
+
+#guard_staged (fun n : Nat => ~(finType `⟨n⟩)) =ₛ fun n : Nat => Fin n
+
 #guard_staged ~(importedSucc `⟨41⟩) =ₛ 41 + 1
 
 /-- error: generated code is not definitionally equal to its denotation
@@ -141,3 +157,27 @@ Note: The following definitions were not unfolded because their definition is no
   opaqueImportedSucc ↦ 1 -/
 #guard_msgs in
 #check ~(opaqueImportedSucc `⟨41⟩)
+
+abbrev NatCode := Code Nat
+
+def viaTypeAlias : NatCode := `⟨5⟩
+
+#guard_staged ~viaTypeAlias =ₛ 5
+
+/-- error: stage mismatch: bound variable `x` is available at stage 1, but is used at stage 0 -/
+#guard_msgs in
+#check `⟨fun (x : Code Nat) => ~x⟩
+
+/-- Deliberately bypasses staging syntax to exercise the trusted generator boundary. -/
+def incoherent : Code Nat :=
+  Code.mk! (fun _ => 0) (.mk (pure (mkNatLit 1)))
+
+example : incoherent.val = 0 := rfl
+
+/-- error: generated code is not definitionally equal to its denotation
+generated:
+  1
+denotation:
+  incoherent.val -/
+#guard_msgs in
+#check ~incoherent
