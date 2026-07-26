@@ -52,7 +52,7 @@ def elabStagedTerm (stx : Syntax) (expectedType? : Option Expr) : TermElabM Expr
     let expectedType ← instantiateMVars expectedType
     ensureNoMVars raw
     ensureNoMVars expectedType
-    transform expectedType raw
+    transform raw
 
 public section
 

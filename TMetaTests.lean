@@ -1,6 +1,7 @@
 module
 
 import TMeta
+public meta import TMetaTests.Imported
 public meta import Lean.Elab.Tactic.Guard
 
 open TMeta
@@ -31,6 +32,16 @@ end
 def idc (α : Code Type) (a : Code ~α) : Code ~α := a
 
 #guard_staged idc `⟨Bool⟩ `⟨true⟩ =~ `⟨true⟩
+
+example {α : Code Type} (f : Code ~α → Code Unit) : Code (~α → Unit) :=
+  `⟨id (fun x => ~(f `⟨x⟩))⟩
+
+example : (α : Type) → (x : α) → (P : α → Type) → P x → P x :=
+  fun (α : Type) (x : α) (P : α → Type) (y : P x) =>
+    ~(`⟨y⟩ : Code (P x))
+
+example : Code ((α : Type) → α → α) :=
+  `⟨fun α x => ~(`⟨x⟩ : Code α)⟩
 
 def map (α β : Code Type) (f : Code ~α → Code ~β) (as : Code (List ~α)) : Code (List ~β) :=
   `⟨(~as).foldr (fun a bs => ~(f `⟨a⟩) :: bs) []⟩

@@ -1,5 +1,6 @@
 module
 
+public import TMeta.Discharge
 public import Lean.Meta.Basic
 
 open Lean Meta
@@ -8,29 +9,42 @@ namespace TMeta
 
 public section
 
-abbrev Codegen := MetaM Expr
+def Codegen := Squash (MetaM Expr)
 
-abbrev ExfCodegen := False → Codegen
+namespace Codegen
 
-namespace ExfCodegen
+opaque stub : Codegen :=
+  .mk (throwError "missing code generator")
 
-private unsafe def runImpl (xfc : ExfCodegen) : Codegen :=
-  xfc lcProof
+instance : Inhabited Codegen :=
+  ⟨stub⟩
+
+instance : Subsingleton Codegen :=
+  inferInstanceAs (Subsingleton (Squash (MetaM Expr)))
+
+private def mkImpl (action : MetaM Expr) : Codegen :=
+  .mk action
+
+@[expose, implemented_by mkImpl]
+def mk (action : MetaM Expr) : Codegen :=
+  stub
+
+@[always_inline]
+private def absImpl {α : Sort u} (k : (Unit → α) → Codegen) : Codegen :=
+  discharge! k (msg :=
+    "TMeta: internal error: a code generator observed an erased variable")
+
+@[expose, implemented_by absImpl]
+def abs {α : Sort u} (k : (Unit → α) → Codegen) : Codegen :=
+  stub
+
+private unsafe def runImpl (gen : Codegen) : MetaM Expr :=
+  @unsafeCast (Squash (MetaM Expr)) (MetaM Expr) gen
 
 @[implemented_by runImpl]
-opaque run (xfc : ExfCodegen) : Codegen
+opaque run (gen : Codegen) : MetaM Expr
 
-private def squashImpl (xfc : ExfCodegen) : ExfCodegen :=
-  xfc
-
-@[expose, implemented_by squashImpl]
-def squash (xfc : ExfCodegen) : ExfCodegen :=
-  False.elim
-
-def default : ExfCodegen :=
-  .squash fun _ => throwError "missing code generator"
-
-end ExfCodegen
+end Codegen
 
 end
 

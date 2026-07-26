@@ -30,10 +30,14 @@ meta def delabCode : Delab := do
   | _ =>
     failure
 
-@[app_delab Code.quote]
+@[app_delab Code.mk!]
 meta def delabQuote : Delab :=
     whenNotPPOption getPPExplicit <| whenPPOption getPPNotation <| withOverApp 3 do
-  let value ← withNaryArg 1 <| withSpliceNotation delab
+  let value ← withNaryArg 1 do
+    let .lam _ type body _ ← getExpr | failure
+    guard (type.isConstOf ``Unit)
+    guard (!body.hasLooseBVars)
+    descend body 1 <| withSpliceNotation delab
   `(`⟨$value⟩)
 
 @[app_delab Code.val]
@@ -43,12 +47,17 @@ meta def delabSplice : Delab :=
   let body ← withNaryArg 1 delab
   `(~$body)
 
-@[app_delab ExfCodegen.squash]
-meta def delabExfCodegenSquash : Delab := withOverApp 1 do
+private def delabCodegen (arity : Nat) : Delab := withOverApp arity do
   `(⋯)
 
-@[app_delab ExfCodegen.default]
-meta def delabExfCodegenDefault : Delab := `(⋯)
+@[app_delab Codegen.abs]
+meta def delabCodegenAbs : Delab := delabCodegen 2
+
+@[app_delab Codegen.mk]
+meta def delabCodegenMk : Delab := delabCodegen 1
+
+@[app_delab Codegen.stub]
+meta def delabCodegenStub : Delab := delabCodegen 0
 
 end
 

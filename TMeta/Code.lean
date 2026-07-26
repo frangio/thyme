@@ -10,47 +10,44 @@ namespace TMeta
 public section
 
 structure Code (α : Sort u) : Sort (max 1 u) where
+  /--
+  The caller must ensure coherence: the generator produces an
+  expression of type `α` that is definitionally equal to `get ()`.
+  -/
   mk! ::
   get : Unit → α
-  xfc : ExfCodegen
+  gen : Codegen
 
 namespace Code
-
-def gen (code : Code α) : Codegen :=
-  code.xfc.run
 
 @[expose]
 def val (code : Code α) : α :=
   code.get ()
 
 @[expose, macro_inline]
-def quote (value : α) (xfc : ExfCodegen := .default) : Code α :=
-  mk! (fun _ => value) xfc.squash
+def quote (value : α) : Code α :=
+  mk! (fun _ => value) .stub
 
 unif_hint (code : Code (Sort u)) (α : Sort u) where
   code ≟ quote α
   ⊢ code.get () ≟ α
 
-@[noinline]
-def forgeGet (h : False) : Unit → α :=
-  fun _ => h.elim
-
-@[expose]
-def forge (h : False) (gen : Codegen) : Code α :=
-  mk! (forgeGet h) (.squash fun _ => gen)
-
 @[simp]
-theorem val_quote (a : α) (xfc : ExfCodegen := .default) :
-    (quote a xfc).val = a :=
+theorem val_mk! (a : α) (gen : Codegen) :
+    (mk! (fun _ => a) gen).val = a :=
   rfl
 
 @[simp]
-theorem quote_val (a : Code α) (xfc : ExfCodegen := .default) :
-    quote a.val xfc = a := by
+theorem val_quote (a : α) :
+    (quote a).val = a :=
+  rfl
+
+@[simp]
+theorem quote_val (a : Code α) :
+    quote a.val = a := by
   simp [quote]
   congr
-  funext _
-  nofun
+  apply Subsingleton.elim
 
 @[ext]
 theorem ext {a b : Code α} (h : a.val = b.val) : a = b := by
@@ -67,7 +64,7 @@ theorem funext
 
 @[coe]
 def coe [ToExpr α] (a : α) : Code α :=
-  Code.mk! (fun _ => a) (.squash fun _ => pure (toExpr a))
+  Code.mk! (fun _ => a) (.mk (pure (toExpr a)))
 
 instance [ToExpr α] : Coe α (Code α) where
   coe := coe

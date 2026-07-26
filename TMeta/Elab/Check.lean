@@ -57,7 +57,10 @@ inductive AppState
   | quote0
   | quote1
   | quote2
-  | quote3
+  | mk0
+  | mk1
+  | mk2
+  | mk3
   | splice0
   | splice1
   | splice2
@@ -65,9 +68,8 @@ inductive AppState
 
 namespace AppState
 
-def isUnsaturatedOp : AppState → Bool
-  | .regular | .code1 | .quote3 | .splice2 => false
-  | _ => true
+def isUnsaturatedOp (state : AppState) : Bool :=
+  state matches .code0 | .quote0 | .quote1 | .splice0 | .splice1
 
 def next : AppState → AppState
   | .regular => .regular
@@ -75,8 +77,11 @@ def next : AppState → AppState
   | .code1 => unreachable!
   | .quote0 => .quote1
   | .quote1 => .quote2
-  | .quote2 => .quote3
-  | .quote3 => unreachable!
+  | .quote2 => unreachable!
+  | .mk0 => .mk1
+  | .mk1 => .mk2
+  | .mk2 => .mk3
+  | .mk3 => unreachable!
   | .splice0 => .splice1
   | .splice1 => .splice2
   | .splice2 => .regular
@@ -84,7 +89,8 @@ def next : AppState → AppState
 def opName : AppState → Name
   | .regular => unreachable!
   | .code0 | .code1 => ``Code
-  | .quote0 | .quote1 | .quote2 | .quote3 => ``Code.quote
+  | .quote0 | .quote1 | .quote2 => ``Code.quote
+  | .mk0 | .mk1 | .mk2 | .mk3 => ``Code.mk!
   | .splice0 | .splice1 | .splice2 => ``Code.val
 
 end AppState
@@ -140,16 +146,20 @@ partial def checkApp (e : Expr) (depth : Int) : CheckM AppState := do
           pushSegment depth
           checkStage arg (depth - 1)
           popSegment
-      | .quote2 =>
+      | .mk0 | .mk1 | .mk2 =>
+          -- Already validated by an earlier staging transformation.
+          -- See `transformCodeMk`.
           pure ()
-      | .code1 | .quote3 =>
-          throwError "invalid {state.opName} application"
+      | .code1 | .quote2 | .mk3 =>
+          unreachable!
       return state.next
   | fn =>
       let fn := fn.cleanupAnnotations
       let name := fn.constName
       if name == ``Code then
         return .code0
+      else if name == ``Code.mk! then
+        return .mk0
       else if name == ``Code.quote then
         return .quote0
       else if name == ``Code.val then

@@ -2,15 +2,15 @@ module
 
 public meta import TMeta.Code
 public meta import TMeta.Elab.Check
-public meta import TMeta.Elab.TypedTransform
+public meta import TMeta.Elab.OpTransform
 public meta import TMeta.Elab.Runtime
 public meta import Lean.Elab.Term.TermElabM
 public meta import Lean.Meta.AppBuilder
-public meta import Lean.Meta.CollectFVars
+public meta import Lean.Meta.Eval
 
 namespace TMeta.Elab
 
-public meta section
+meta section
 
 structure Zipper (α : Type u) where
   left : Array α
@@ -34,6 +34,13 @@ end Zipper
 
 open Lean Elab Term Meta
 
+unsafe def evalCodegenImpl (gen : Expr) : MetaM Expr := do
+  let result ← evalExpr Codegen (mkConst ``Codegen) gen
+  result.run
+
+@[implemented_by evalCodegenImpl]
+opaque evalCodegen (gen : Expr) : MetaM Expr
+
 public meta register_option tmeta.checkCoherence : Bool := {
   defValue := false
   descr := "check that generated code is definitionally equal to its denotation"
@@ -41,50 +48,25 @@ public meta register_option tmeta.checkCoherence : Bool := {
 
 def mkArrayLitOf (type : Expr) (xs : Array α) (f : α → Expr) : MetaM Expr := do
   let u ← getDecLevel type
-  let nil := mkApp (mkConst ``List.nil [u]) type
-  let cons := mkApp (mkConst ``List.cons [u]) type
+  let nil := .app (mkConst ``List.nil [u]) type
+  let cons := .app (mkConst ``List.cons [u]) type
   let list := xs.foldr (fun x list => mkApp2 cons (f x) list) nil
   return mkApp2 (mkConst ``List.toArray [u]) type list
 
 structure SpliceCapture where
   level : Level
-  bodyType : Expr
+  type : Expr
   body : Expr
-
-namespace SpliceCapture
-
-def gen : SpliceCapture → Expr
-  | { level, bodyType, body } =>
-    mkApp2 (mkConst ``Code.gen [level]) bodyType body
-
-def val : SpliceCapture → Expr
-  | { level, bodyType, body } =>
-    mkApp2 (mkConst ``Code.val [level]) bodyType body
-
-end SpliceCapture
-
-structure QuoteBody where
-  template : QuoteTemplate
-  splices : Array SpliceCapture
+  gen : Expr
 
 structure QuoteState where
+  lctxStart : Nat
   splices : Array SpliceCapture
   spliceHoles : Array MVarId
   deriving Inhabited
 
-structure StageFrame where
-  quote? : Option QuoteState := none
-  /--
-  An fvar `hFalse : False` introduced as a local assumption while
-  building an `ExfCodegen`. A quote encountered while the assumption is
-  present must become `Code.forge` rather than preserving a potentially
-  open value term with `Code.quote`.
-  -/
-  hFalse? : Option Expr := none
-  deriving Inhabited
-
 structure TransformState where
-  frames : Zipper StageFrame
+  frames : Zipper (Option QuoteState)
   stage : Int
   deriving Inhabited
 
@@ -92,34 +74,16 @@ abbrev TransformM := StateT TransformState TermElabM
 
 instance : Inhabited (TransformM α) := ⟨throw default⟩
 
-namespace QuoteBody
-
-def gen (quote : QuoteBody) : TransformM Expr := do
-  let declName := (← getDeclName?).getD .anonymous
-  let index ← quote.template.register declName
-  let splices ← mkArrayLitOf (mkConst ``Codegen) quote.splices (·.gen)
-  return mkApp3 (mkConst ``instantiateQuoteTemplate)
-    (toExpr declName) (toExpr index) splices
-
-end QuoteBody
-
-def getFrame : TransformM StageFrame :=
-  return (← get).frames.current
-
 def getStage : TransformM Int :=
   return (← get).stage
 
-def modifyFrame (f : StageFrame → StageFrame) : TransformM Unit :=
-  modify fun s =>
-    { s with frames := { s.frames with current := f s.frames.current } }
-
-def modifyGetFrame (f : StageFrame → α × StageFrame) : TransformM α :=
-  modifyGet fun s =>
-    let (result, current) := f s.frames.current
-    (result, { s with frames := { s.frames with current } })
+def getQuote? : TransformM (Option QuoteState) :=
+  return (← get).frames.current
 
 def modifyQuote (f : QuoteState → QuoteState) : TransformM Unit :=
-  modifyFrame fun frame => { frame with quote? := some (f frame.quote?.get!) }
+  modify fun s => { s with
+    frames := { s.frames with current := some (f s.frames.current.get!) }
+  }
 
 def withSuccFrame (k : TransformM α) : TransformM α := do
   modify fun s => { s with
@@ -145,197 +109,130 @@ def withPredFrame (k : TransformM α) : TransformM α := do
   }
   return result
 
-def withHFalse (k : Expr → TransformM α) : TransformM α :=
-  withLocalDeclD `_hFalse (mkConst ``False) fun hFalse => do
-    let saved ← modifyGetFrame fun current =>
-      (current.hFalse?, { current with hFalse? := some hFalse })
-    let result ← k hFalse
-    modifyFrame fun current => { current with hFalse? := saved }
-    return result
-
 def withQuote (k : TransformM α) : TransformM (α × QuoteState) := do
-  let saved ← modifyGetFrame fun current =>
-    (current.quote?, { current with
-      quote? := some { splices := #[], spliceHoles := #[] }
-    })
+  let lctxStart := (← getLCtx).numIndices
+  let saved ← modifyGet fun s =>
+    (s.frames.current, { s with frames := { s.frames with
+      current := some { lctxStart, splices := #[], spliceHoles := #[] }
+    } })
   let result ← k
-  let some quote ← modifyGetFrame fun current =>
-    (current.quote?, { current with quote? := saved })
+  let some quote ← modifyGet fun s =>
+    (s.frames.current, { s with frames := { s.frames with current := saved } })
     | unreachable!
   return (result, quote)
 
-def getHFalse? : TransformM (Option Expr) :=
-  return (← getFrame).hFalse?
-
-def getQuote? : TransformM (Option QuoteState) :=
-  return (← getFrame).quote?
-
-def withFVarAxioms (e : Expr) (k : Expr → TransformM α) : TransformM α :=
-  withoutModifyingEnv do
-    let (_, used) ← e.collectFVars.run {}
-    let used ← used.addDependencies
-    let fvars := (← sortFVarIds used.fvarIds).map .fvar
-    let mut axioms := .emptyWithCapacity fvars.size
-    for fvar in fvars do
-      let decl ← fvar.fvarId!.getDecl
-      let type := (decl.type.abstractRange axioms.size fvars).instantiateRev axioms
-      let name ← mkAuxDeclName decl.userName
-      let levelParams := (collectLevelParams {} type).params.toList
-      addDecl <| .axiomDecl { name, levelParams, type, isUnsafe := false }
-      axioms := axioms.push (mkConst name (levelParams.map .param))
-    k (e.replaceFVars fvars axioms)
+/--
+Closes a `Codegen` expression over the live local declarations from
+`start` onward. Each declaration becomes a thunk parameter, with
+occurrences in later declaration types and `e` replaced by calls to the
+corresponding thunk. The parameters are discharged with `Codegen.abs` and
+must never be forced by the resulting generator.
+-/
+def closeLCtxRange (start : Nat) (e : Expr) : MetaM Expr := do
+  let lctx ← getLCtx
+  let decls := Array.emptyWithCapacity (lctx.numIndices - start) |>
+    lctx.foldl .push (start := start)
+  let fvars := decls.map fun decl => Expr.fvar decl.fvarId
+  let unit := Lean.mkConst ``Unit.unit
+  let thunks :=
+    Array.ofFn (n := decls.size) fun i => .app (.bvar (decls.size - 1 - i)) unit
+  let types := decls.mapIdx fun i decl =>
+    decl.type.abstractRange i fvars
+      |>.instantiateRevRange (decls.size - i) decls.size thunks
+  have : types.size = decls.size := by simp [types]
+  let body := (e.abstract fvars).instantiateRev thunks
+  decls.size.foldRevM (init := body) fun i h body => do
+    let decl := decls[i]
+    let type := types[i]
+    let level ← getLevel decl.type
+    let thunkType := mkSimpleThunkType (type.liftLooseBVars 0 1)
+    let k := .lam decl.userName thunkType body .default
+    return mkApp2 (mkConst ``Codegen.abs [level]) type k
 
 namespace TransformM
 
 mutual
 
-partial def transform := TypedTransform.transform getConstAppTransform?
-partial def transformAppArgs := TypedTransform.transformAppArgs getConstAppTransform?
+partial def transform := OpTransform.transform getOpAppTransform
 
-partial def getConstAppTransform? (name : Name) : Option (ConstAppTransform TransformM) :=
-  if name == ``Code then
-    some transformCode
-  else if name == ``Code.quote then
-    some transformQuote
-  else if name == ``Code.val then
-    some transformSplice
-  else
-    none
-
-partial def transformCode (mode : TypeMode) (fn : Expr) (args : Array Expr) :
-    TransformM (mode.Result Expr) := do
-  let .const _ [level] := fn | unreachable!
-  unless args.size ≥ 1 do throwError "invalid Code application"
-  let type := args[0]!
-  let type ← withSuccFrame <|
-    transform (.expect (.sort level) #[]) type
-  transformAppArgs mode (.app fn type) args
-    (.sort (mkLevelMax' .one level)) #[] 1
-
-partial def transformQuote (mode : TypeMode) (quoteFn : Expr) (args : Array Expr) :
-    TransformM (mode.Result Expr) := do
-  let .const _ [level] := quoteFn | unreachable!
-  unless args.size = 3 do throwError "invalid Code.quote application"
-  let sourceBody := args[1]!
-  let mkCodeType type :=
-    mkApp (mkConst ``Code [level]) type
-  if let some hFalse ← getHFalse? then
-    let mkCodeForge type hFalse gen :=
-      mkApp3 (mkConst ``Code.forge [level]) type hFalse gen
-    match mode with
-    | .expect codeTypeAbs typeEnv =>
-      let (.app _ typeAbs, typeEnv) ←
-        view (·.isAppOfArity ``Code 1) codeTypeAbs typeEnv
-        | throwError "Code expected"
-      let type := instantiate typeAbs typeEnv
-      let body ←
-        withSuccFrame <| transformBody (.expect typeAbs typeEnv) sourceBody
-      let gen ← body.gen
-      return mkCodeForge type hFalse gen
-    | .synth =>
-      let body ←
-        withSuccFrame <| transformBody .synth sourceBody
-      let gen ← body.val.gen
-      let type := body.type
-      let expr := mkCodeForge type hFalse gen
-      return .mk expr (mkCodeType type)
-  else if (← getQuote?).isSome then
-    withHFalse fun hFalse => do
-      let body ←
-        withSuccFrame <| transformBody .synth sourceBody
-      let quote := body.val
-      let gen ← quote.gen
-      quote.template.withInstantiate quote.splices (pure ·.val) do
-        let value ← instantiateMVars quote.template.body
-        let type ← instantiateMVars body.type
-        let xfc ← mkLambdaFVars #[hFalse] gen
-        let expr := mkApp3 quoteFn type value xfc
-        return .mk expr (mkCodeType type)
-  else
-    let type := args[0]!
-    let xfc ← withHFalse fun hFalse => do
-      let body ←
-        withSuccFrame <| transformBody (.expect type #[]) sourceBody
-      let gen ← body.gen
-      mkLambdaFVars #[hFalse] gen
-    let expr := mkApp3 quoteFn type sourceBody xfc
-    return .mk expr (mkCodeType type)
-where
-  transformBody (mode : TypeMode) (sourceBody : Expr) :
-      TransformM (mode.Result QuoteBody) := do
-    let (body, { splices, spliceHoles }) ←
-      withQuote <| transform mode sourceBody
-    let mctx ← getMCtx
-    return body.map fun body => {
-      template := { body, spliceHoles, mctx }
-      splices
-    }
-
-partial def transformSplice (mode : TypeMode) (spliceFn : Expr) (args : Array Expr) :
-    TransformM (mode.Result Expr) := do
-  let .const _ [level] := spliceFn | unreachable!
-  unless args.size ≥ 2 do throwError "invalid Code.val application"
-  let sourceType := args[0]!
-  let sourceBody := args[1]!
-  if args.size = 2 then
-    transformCore mode level sourceType sourceBody
-  else
-    let core ← transformCore .synth level sourceType sourceBody
-    transformAppArgs mode core.val args core.typeAbs core.typeEnv 2
-where
-  transformCore (mode : TypeMode) (level : Level) (sourceType sourceBody : Expr) :
-      TransformM (mode.Result Expr) := do
-    if (← getQuote?).isSome then
-      let (body, bodyType) ← withPredFrame <| transformBody sourceBody
-      let type := match mode with
-        | .expect typeAbs typeEnv => instantiate typeAbs typeEnv
-        | .synth => bodyType
-      let hole ← mkFreshExprMVar (some type) .syntheticOpaque
-      modifyQuote fun quote => { quote with
-        splices := quote.splices.push { level, bodyType, body }
-        spliceHoles := quote.spliceHoles.push hole.mvarId!
-      }
-      return .mk hole bodyType
-    else if (← getStage) ≤ 0 then
-      let result ← withPredFrame <| withHFalse fun hFalse => do
-        let (body, bodyType) ← transformBody sourceBody
-        let gen := mkApp2 (mkConst ``Code.gen [level]) bodyType body
-        let xfc ← mkLambdaFVars #[hFalse] gen
-        let gen := mkApp (mkConst ``ExfCodegen.run) xfc
-        let expr ← withFVarAxioms gen (liftM ∘ evalCodegen)
-        return .mk expr bodyType
-      if ← tmeta.checkCoherence.getM then
-        if (← getHFalse?).isNone then
-          let denotation := mkApp2 spliceFn sourceType sourceBody
-          unless ← withNewMCtxDepth <| isDefEqGuarded result.val denotation do
-            throwError m!"generated code is not definitionally equal to its denotation\n\
-              generated:{indentExpr result.val}\n\
-              denotation:{indentExpr denotation}"
-      return result
+partial def getOpAppTransform : Name → OpTransform.OpAppTransform TransformM
+  | name =>
+    if name == ``Code then
+      .transform transformCode
+    else if name == ``Code.quote then
+      .transform transformQuote
+    else if name == ``Code.val then
+      .transform transformSplice
+    else if name == ``Code.mk! then
+      -- `Code.mk!` was produced by an earlier staging transformation, so its
+      -- arguments have already been checked and transformed.
+      .skip 3
     else
-      let (body, bodyType) ← withPredFrame <| transformBody sourceBody
-      let expr := mkApp2 (mkConst ``Code.val [level]) bodyType body
-      return .mk expr bodyType
+      .default
 
-  transformBody (sourceBody : Expr) : TransformM (Expr × Expr) := do
-    let body ← transform .synth sourceBody
-    let (.app _ typeAbs, typeEnv) ←
-      view (·.isAppOfArity ``Code 1) body.typeAbs body.typeEnv
-      | throwError "Code expected"
-    let type := instantiate typeAbs typeEnv
-    return (body.val, type)
+partial def transformCode (fn : Expr) (args : Vector Expr 1) : TransformM Expr := do
+  let .const _ [level] := fn | unreachable!
+  let type ← withSuccFrame <| transform args[0]
+  return .app fn type
+
+partial def transformQuote (quoteFn : Expr) (args : Vector Expr 2) : TransformM Expr := do
+  let .const _ [level] := quoteFn | unreachable!
+  let type := args[0]
+  let sourceBody := args[1]
+  let (body, { splices, spliceHoles, .. }) ←
+    withSuccFrame <| withQuote <| transform sourceBody
+  let template := { body, spliceHoles, mctx := ← getMCtx : QuoteTemplate }
+  let declName := (← getDeclName?).getD .anonymous
+  let index ← template.register declName
+  let spliceGens ← splices.mapM fun splice => instantiateMVars splice.gen
+  let spliceGens ← mkArrayLitOf (mkConst ``Codegen) spliceGens id
+  let action := mkApp3 (mkConst ``instantiateQuoteTemplate)
+    (toExpr declName) (toExpr index) spliceGens
+  let gen := .app (mkConst ``Codegen.mk) action
+  let value ← template.instantiate splices fun s =>
+    pure <| mkApp2 (mkConst ``Code.val [s.level]) s.type s.body
+  let get := mkSimpleThunk value
+  return mkApp3 (mkConst ``Code.mk! [level]) type get gen
+
+partial def transformSplice (spliceFn : Expr) (args : Vector Expr 2) : TransformM Expr := do
+  let .const _ [level] := spliceFn | unreachable!
+  let type := args[0]
+  let sourceBody := args[1]
+  let body ← withPredFrame <| transform sourceBody
+  if let some quote ← getQuote? then
+    let gen := mkApp2 (mkConst ``Code.gen [level]) type body
+    let gen ← closeLCtxRange quote.lctxStart gen
+    let hole ← mkFreshExprMVar (some type) .syntheticOpaque
+    modifyQuote fun quote => { quote with
+      splices := quote.splices.push { level, type, body, gen }
+      spliceHoles := quote.spliceHoles.push hole.mvarId!
+    }
+    return hole
+  else if (← getStage) ≤ 0 then
+    let gen := mkApp2 (mkConst ``Code.gen [level]) type body
+    let gen ← closeLCtxRange 0 gen
+    let result ← evalCodegen gen
+    if ← tmeta.checkCoherence.getM then
+      let denotation := mkApp2 spliceFn type sourceBody
+      unless ← withNewMCtxDepth <| isDefEqGuarded result denotation do
+        throwError m!"generated code is not definitionally equal to its denotation\n\
+          generated:{indentExpr result}\n\
+          denotation:{indentExpr denotation}"
+    return result
+  else
+    return mkApp2 (mkConst ``Code.val [level]) type body
 
 end
 
 end TransformM
 
-def transform (expectedType : Expr) (e : Expr) : TermElabM Expr := do
+public def transform (e : Expr) : TermElabM Expr := do
   checkStages e
   let lctx ← instantiateLCtxMVars (← getLCtx)
   let localInstances ← getLocalInstances
   withLCtx lctx localInstances <| withMCtx {} <|
-    (TransformM.transform (.expect expectedType #[]) e).run' {
-      frames := { left := #[], current := {}, right := #[] }
+    (TransformM.transform e).run' {
+      frames := { left := #[], current := none, right := #[] }
       stage := 0
     }
 
