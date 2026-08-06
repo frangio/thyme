@@ -1,0 +1,16 @@
+name = "tmeta"
+version = "0.1.0"
+description = "Type-safe staged programming supporting dependent types and reasoning about metaprograms."
+license = "Apache-2.0"
+defaultTargets = ["TMeta"]
+testDriver = "TMetaTests"
+
+[leanOptions]
+backward.do.legacy = true
+
+[[lean_lib]]
+name = "TMeta"
+precompileModules = true
+
+[[lean_lib]]
+name = "TMetaTests"

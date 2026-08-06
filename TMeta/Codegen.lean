@@ -1,6 +1,5 @@
 module
 
-public import TMeta.Discharge
 public import Lean.Meta.Basic
 
 open Lean Meta
@@ -13,8 +12,11 @@ def Codegen := Squash (MetaM Expr)
 
 namespace Codegen
 
+opaque stubAction : MetaM Expr :=
+  throwError "missing code generator"
+
 opaque stub : Codegen :=
-  .mk (throwError "missing code generator")
+  .mk stubAction
 
 instance : Inhabited Codegen :=
   ⟨stub⟩
@@ -25,17 +27,8 @@ instance : Subsingleton Codegen :=
 private def mkImpl (action : MetaM Expr) : Codegen :=
   .mk action
 
-@[expose, implemented_by mkImpl]
-def mk (action : MetaM Expr) : Codegen :=
-  stub
-
-@[always_inline]
-private def absImpl {α : Sort u} (k : (Unit → α) → Codegen) : Codegen :=
-  discharge! k (msg :=
-    "TMeta: internal error: a code generator observed an erased variable")
-
-@[expose, implemented_by absImpl]
-def abs {α : Sort u} (k : (Unit → α) → Codegen) : Codegen :=
+@[implemented_by mkImpl]
+abbrev mk (action : MetaM Expr) : Codegen :=
   stub
 
 private unsafe def runImpl (gen : Codegen) : MetaM Expr :=

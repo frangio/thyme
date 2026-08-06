@@ -1,8 +1,10 @@
 module
 
-public meta import TMeta.Code
+public meta import Lean.Meta.Basic
+public meta import TMeta.Elab.Context
+import TMeta.Code
 
-open Lean Meta
+open Lean Meta Elab
 
 namespace TMeta.Elab
 
@@ -10,26 +12,39 @@ meta section
 
 structure CheckState where
   binders : Array Name
-  segmentEnds : Array Nat
-  segmentDepths : Array Int
+  segmentStarts : Array Nat
+  segmentStages : Array Int
+  segmentSizes : segmentStarts.size = segmentStages.size
 
-abbrev CheckM := StateT CheckState MetaM
+structure CheckContext where
+  indexFVarId? : Option FVarId
+
+abbrev CheckM := ReaderT CheckContext (StateT CheckState MetaM)
 
 def pushBinder (name : Name) : CheckM PUnit :=
-  modify fun ⟨binders, segmentEnds, segmentDepths⟩ =>
-    ⟨binders.push name, segmentEnds, segmentDepths⟩
+  modify fun s => { s with binders := s.binders.push name }
 
 def popBinder : CheckM PUnit :=
-  modify fun ⟨binders, segmentEnds, segmentDepths⟩ =>
-    ⟨binders.pop, segmentEnds, segmentDepths⟩
+  modify fun s => { s with binders := s.binders.pop }
 
-def pushSegment (depth : Int) : CheckM PUnit :=
-  modify fun ⟨binders, segmentEnds, segmentDepths⟩ =>
-    ⟨binders, segmentEnds.push binders.size, segmentDepths.push depth⟩
+def pushSegment (stage : Int) : CheckM PUnit :=
+  modify fun s => {
+    s with
+    segmentStarts := s.segmentStarts.push s.binders.size
+    segmentStages := s.segmentStages.push stage
+    segmentSizes := by simp [s.segmentSizes]
+  }
 
 def popSegment : CheckM PUnit :=
-  modify fun ⟨binders, segmentEnds, segmentDepths⟩ =>
-    ⟨binders, segmentEnds.pop, segmentDepths.pop⟩
+  modify fun s => {
+    s with
+    segmentStarts := s.segmentStarts.pop
+    segmentStages := s.segmentStages.pop
+    segmentSizes := by simp [s.segmentSizes]
+  }
+
+def currentStage : CheckM Int :=
+  return (← get).segmentStages.back!
 
 def binderIndex (deBruijnIndex : Nat) : CheckM Nat := do
   let numBinders := (← get).binders.size
@@ -41,116 +56,141 @@ def binderName (deBruijnIndex : Nat) : CheckM Name := do
   let index ← binderIndex deBruijnIndex
   return (← get).binders[index]!
 
-def binderDepth (deBruijnIndex : Nat) : CheckM (Option Int) := do
+def binderStage (deBruijnIndex : Nat) : CheckM Int := do
   let index ← binderIndex deBruijnIndex
-  let state ← get
-  for h : offset in *...state.segmentEnds.size do
-    let i := state.segmentEnds.size - (offset + 1)
-    if state.segmentEnds[i] ≤ index then
-      return state.segmentDepths[i + 1]?
-  return state.segmentDepths[0]?
+  let { segmentStarts, segmentStages, segmentSizes, .. } ← get
+  for h : offset in *...segmentStarts.size do
+    let i := segmentStarts.size - (offset + 1)
+    if segmentStarts[i] ≤ index then
+      return segmentStages[i]
+  unreachable!
 
 inductive AppState
   | regular
   | code0
   | code1
-  | quote0
-  | quote1
-  | quote2
+  | code2
   | mk0
   | mk1
   | mk2
   | mk3
-  | splice0
-  | splice1
-  | splice2
+  | mk4
+  | den0
+  | den1
+  | den2
+  | den3
+  | den4
   deriving Inhabited
 
 namespace AppState
 
 def isUnsaturatedOp (state : AppState) : Bool :=
-  state matches .code0 | .quote0 | .quote1 | .splice0 | .splice1
+  state matches
+    .code0 | .code1 |
+    .mk0 | .mk1 | .mk2 | .mk3 |
+    .den0 | .den1 | .den2 | .den3
 
 def next : AppState → AppState
   | .regular => .regular
   | .code0 => .code1
-  | .code1 => unreachable!
-  | .quote0 => .quote1
-  | .quote1 => .quote2
-  | .quote2 => unreachable!
+  | .code1 => .code2
+  | .code2 => unreachable!
   | .mk0 => .mk1
   | .mk1 => .mk2
   | .mk2 => .mk3
-  | .mk3 => unreachable!
-  | .splice0 => .splice1
-  | .splice1 => .splice2
-  | .splice2 => .regular
+  | .mk3 => .mk4
+  | .mk4 => unreachable!
+  | .den0 => .den1
+  | .den1 => .den2
+  | .den2 => .den3
+  | .den3 => .den4
+  | .den4 => .regular
 
 def opName : AppState → Name
   | .regular => unreachable!
-  | .code0 | .code1 => ``Code
-  | .quote0 | .quote1 | .quote2 => ``Code.quote
-  | .mk0 | .mk1 | .mk2 | .mk3 => ``Code.mk!
-  | .splice0 | .splice1 | .splice2 => ``Code.val
+  | .code0 | .code1 | .code2 => ``Code
+  | .mk0 | .mk1 | .mk2 | .mk3 | .mk4 => ``Code.mk
+  | .den0 | .den1 | .den2 | .den3 | .den4 => ``Code.den
 
 end AppState
 
+def reportStagingError (name : MessageData) : CheckM α :=
+  throwError m!"staging error: variable `{name}` is not available in the current staging context"
+
 mutual
 
-partial def checkStage (e : Expr) (depth : Int) : CheckM Unit := do
+partial def checkStage (e : Expr) : CheckM Unit := do
+  let { indexFVarId? } ← read
   match e with
   | .app .. =>
-      let state ← checkApp e depth
+      let state ← checkApp e
       if state.isUnsaturatedOp then
         throwError "invalid {state.opName} application"
   | .lam name domain body _ | .forallE name domain body _ =>
-      checkStage domain depth
+      checkStage domain
       pushBinder name
-      checkStage body depth
+      checkStage body
       popBinder
   | .letE name type value body _ =>
-      checkStage type depth
-      checkStage value depth
+      checkStage type
+      checkStage value
       pushBinder name
-      checkStage body depth
+      checkStage body
       popBinder
   | .bvar deBruijnIndex =>
-      let some binderDepth ← binderDepth deBruijnIndex | return
-      unless binderDepth = depth do
+      let binderStage ← binderStage deBruijnIndex
+      let stage ← currentStage
+      unless binderStage = stage do
         let name ← binderName deBruijnIndex
-        throwError m!"stage mismatch: bound variable `{name}` is available at stage \
-          {binderDepth}, but is used at stage {depth}"
+        reportStagingError m!"{name}"
   | .fvar fvarId =>
-      unless depth = 0 do
-        throwError m!"stage mismatch: local {mkFVar fvarId} is available at stage 0, \
-          but is used at stage {depth}"
+    unless indexFVarId? == some fvarId do
+      let fvarStage ← getFVarStage fvarId
+      let stage ← currentStage
+      unless stage = fvarStage do
+        reportStagingError m!"{mkFVar fvarId}"
   | .mvar mvarId =>
       throwError m!"staged term contains unresolved metavariable {mkMVar mvarId}"
   | .mdata _ body | .proj _ _ body =>
-      checkStage body depth
+      checkStage body
   | .sort .. | .const .. | .lit .. =>
       return
 
-partial def checkApp (e : Expr) (depth : Int) : CheckM AppState := do
+/-- Check the body of a denotational function without checking its
+implementation-detail `Den` domain. -/
+partial def checkDen (e : Expr) : CheckM Unit := do
+  match e.consumeMData with
+  | .lam name domain body _ =>
+      let_expr Den index := domain
+        | throwError "malformed denotational function"
+      withReader ({ · with indexFVarId? := index.fvarId? }) do
+        pushBinder name
+        checkStage body
+        popBinder
+  | e =>
+      checkStage e
+
+partial def checkApp (e : Expr) : CheckM AppState := do
+  let stage ← currentStage
   match e with
   | .app fn arg =>
-      let state ← checkApp fn depth
+      let state ← checkApp fn
       match state with
-      | .regular | .splice0 | .splice2 =>
-          checkStage arg depth
-      | .code0 | .quote0 | .quote1 =>
-          pushSegment depth
-          checkStage arg (depth + 1)
+      | .regular | .den4 =>
+          checkStage arg
+      | .code1 | .mk1 | .mk2 =>
+          pushSegment (stage + 1)
+          checkDen arg
           popSegment
-      | .splice1 =>
-          pushSegment depth
-          checkStage arg (depth - 1)
+      | .den1 =>
+          checkDen arg
+      | .den2 =>
+          pushSegment (stage - 1)
+          checkStage arg
           popSegment
-      | .mk0 | .mk1 | .mk2 =>
-          -- Already validated by an earlier staging transformation.
-          -- See `transformCodeMk`.
+      | .code0 | .mk0 | .mk3 | .den0 | .den3 =>
           pure ()
-      | .code1 | .quote2 | .mk3 =>
+      | .code2 | .mk4 =>
           unreachable!
       return state.next
   | fn =>
@@ -158,24 +198,26 @@ partial def checkApp (e : Expr) (depth : Int) : CheckM AppState := do
       let name := fn.constName
       if name == ``Code then
         return .code0
-      else if name == ``Code.mk! then
+      else if name == ``Code.mk then
         return .mk0
-      else if name == ``Code.quote then
-        return .quote0
-      else if name == ``Code.val then
-        return .splice0
+      else if name == ``Code.den then
+        return .den0
       else
-        checkStage fn depth
+        checkStage fn
         return .regular
 
 end
 
-public def checkStages (e : Expr) : MetaM Unit :=
-  (checkStage e 0).run' {
-    binders := #[]
-    segmentEnds := #[]
-    segmentDepths := #[]
-  }
+public def checkStages (e : Expr) (indexFVarId? : Option FVarId := none)
+    (startStage : Int := 0) : MetaM Unit :=
+  (checkStage e)
+    |>.run { indexFVarId? }
+    |>.run' {
+      binders := #[]
+      segmentStarts := #[0]
+      segmentStages := #[startStage]
+      segmentSizes := rfl
+    }
 
 end
 

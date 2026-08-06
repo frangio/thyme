@@ -1,7 +1,6 @@
 module
 
 public import TMeta.Codegen
-public import Lean.EnvExtension
 
 open Lean Meta
 

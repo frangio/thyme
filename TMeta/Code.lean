@@ -1,7 +1,6 @@
 module
 
 public import TMeta.Codegen
-public import Lean.Meta.Basic
 
 open Lean Meta
 
@@ -9,70 +8,95 @@ namespace TMeta
 
 public section
 
-structure Code (α : Sort u) : Sort (max 1 u) where
-  /--
-  The caller must ensure coherence: the generator produces an
-  expression of type `α` that is definitionally equal to `get ()`.
-  -/
-  mk! ::
-  get : Unit → α
-  gen : Codegen
+inductive Interpretation where
+  | den
+  | gen
+  deriving DecidableEq, ToExpr
+
+@[class]
+inductive Den : Interpretation → Prop where
+  | intro : Den .den
+
+@[default_instance]
+instance : Den .den := .intro
+
+namespace Den
+
+def elim : (α : [Den i] → Sort u) → i = .gen → [Den i] → α := nofun
+
+def elimType : i = .gen → [Den i] → Sort u := elim _
+
+theorem heq_of_gen
+    {α β : [Den i] → Sort u}
+    (hGen : i = .gen)
+    (a : [Den i] → α) (b : [Den i] → β) : @a ≍ @b := by
+  subst i
+  have : @α = @β := by
+    funext hDen
+    nomatch hDen
+  subst β
+  apply heq_of_eq
+  funext hDen
+  nomatch hDen
+
+end Den
+
+structure Code (i : Interpretation) (α : [Den i] → Sort u) where
+  den : [Den i] → α
+  gen : i = .gen → Codegen := fun _ => .stub
+
+unif_hint (i : Interpretation) (h : Den i) (α : Sort u)
+    (code : Code i (fun [Den i] => α))
+    (a den : α) where
+  code ≟ .mk (fun [Den i] => den) (fun _ => .stub)
+  den ≟ a
+  ⊢ @code.den h ≟ a
 
 namespace Code
 
-@[expose]
-def val (code : Code α) : α :=
-  code.get ()
+@[simp↓]
+theorem eq_canonical {i : Interpretation} {α : [Den i] → Sort u}
+    (den : [Den i] → α) (action : i = .gen → MetaM Expr) :
+  mk @den (fun hGen => .mk (action hGen)) = mk @den (fun _ => .stub) := rfl
 
-@[expose, macro_inline]
-def quote (value : α) : Code α :=
-  mk! (fun _ => value) .stub
-
-unif_hint (code : Code (Sort u)) (α : Sort u) where
-  code ≟ quote α
-  ⊢ code.get () ≟ α
-
-@[simp]
-theorem val_mk! (a : α) (gen : Codegen) :
-    (mk! (fun _ => a) gen).val = a :=
-  rfl
-
-@[simp]
-theorem val_quote (a : α) :
-    (quote a).val = a :=
-  rfl
-
-@[simp]
-theorem quote_val (a : Code α) :
-    quote a.val = a := by
-  simp [quote]
+theorem eq_canonical' {i : Interpretation} {α : [Den i] → Sort u}
+    (den : [Den i] → α) (gen : (i = .gen) → Codegen) :
+    mk @den @gen = mk @den (fun _ => .stub) := by
   congr
   apply Subsingleton.elim
 
 @[ext]
-theorem ext {a b : Code α} (h : a.val = b.val) : a = b := by
-  rw [← quote_val a, ← quote_val b, h]
+theorem ext {a b : Code i @α} (h : @a.den = @b.den) : a = b := by
+  cases a
+  cases b
+  congr
+  apply Subsingleton.elim
 
 @[ext]
 theorem funext
-    {α : Sort u} {β : Code α → Sort v}
-    {f g : (a : Code α) → β a}
-    (h : ∀ (a : α), f (quote a) = g (quote a)) :
+    {α : [Den i] → Sort u} {β : Code i @α → Sort v}
+    {f g : (a : Code i @α) → β a}
+    (h : ∀ (a : [Den i] → α), f { den := @a } = g { den := @a }) :
     f = g := by
-  funext x
-  rw [← quote_val x, h]
+  funext c
+  rcases c with ⟨a⟩
+  rw [eq_canonical', h a]
 
-@[coe]
-def coe [ToExpr α] (a : α) : Code α :=
-  Code.mk! (fun _ => a) (.mk (pure (toExpr a)))
-
-instance [ToExpr α] : Coe α (Code α) where
-  coe := coe
-
-@[simp]
-theorem coe_eq_quote [ToExpr α] (a : α) :
-    coe a = quote a := by
-  rfl
+theorem heq_of_gen
+    {α₁ α₂ : [Den i] → Sort u}
+    (hGen : i = .gen)
+    (a₁ : Code i @α₁) (a₂ : Code i @α₂) : a₁ ≍ a₂ := by
+  have : @α₁ = @α₂ := eq_of_heq (Den.heq_of_gen hGen @α₁ @α₂)
+  subst α₂
+  apply heq_of_eq
+  subst i
+  cases a₁
+  cases a₂
+  congr
+  · funext hDen
+    nomatch hDen
+  · funext
+    apply Subsingleton.elim
 
 end Code
 

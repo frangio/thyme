@@ -56,7 +56,7 @@ def exp (n : Nat) (x : Code Nat) : Code Nat :=
 
 #guard_staged fun x => ~(exp 3 `⟨x⟩) =ₛ fun x => 1 * x * x * x
 
-theorem exp_eq_pow (n : Nat) (x : Code Nat) : (exp n x).val = x.val ^ n := by
+theorem exp_eq_pow (n : Nat) (x : Nat) : (exp n `⟨x⟩).den = x ^ n := by
   unfold exp
   induction n with
   | zero => rfl
@@ -110,28 +110,41 @@ def dependentArg (x : Code Nat) (h : Code (~x = 0)) : Code { n : Nat // n = 0 } 
 
 #guard_staged `⟨~(dependentArg `⟨0⟩ `⟨rfl⟩)⟩ =~ `⟨⟨0, rfl⟩⟩
 
-/-- error: stage mismatch: bound variable `x` is available at stage -1, but is used at stage 0 -/
+/-- error: staging error: variable `x` is not available in the current staging context -/
 #guard_msgs in
 #check ~(let x := 'c'; `⟨x⟩)
 
-variable (n : Nat) in
-#check_simp (`⟨~↑n⟩ : Code Nat).val ~> n
-
-#guard_staged ~(~(`⟨`⟨1⟩⟩ : Code (Code Nat))) =ₛ 1
-
-def nestedValue (x : Code (Code Nat)) : Code (Code Nat) :=
-  `⟨`⟨~~x⟩⟩
-
-#guard_staged ~(nestedValue `⟨`⟨1⟩⟩) =~ `⟨1⟩
-
-def rawQuote (n : Nat) : Code Nat := .quote n
-/-- error: missing code generator -/
+/-- error: staging error: variable `x` is not available in the current staging context -/
 #guard_msgs in
-#check ~(rawQuote 1 : Code Nat)
+def illStagedFVar (x : Nat) : Code Nat :=
+  `⟨x⟩
 
-#guard_staged ~(~(~(`⟨`⟨`⟨7⟩⟩⟩ : Code (Code (Code Nat))))) =ₛ 7
+def nestedSpliceNatF (_ : Nat) : Code Nat := `⟨1⟩
 
-universe u
+def nestedSpliceNatG (_ : Nat) : Code Nat := `⟨2⟩
+
+#guard_staged ~(nestedSpliceNatF ~(nestedSpliceNatG 123)) =ₛ 1
+
+def nestedSpliceFunF (_ : Nat → Nat) : Code Nat := `⟨1⟩
+
+def nestedSpliceCodeG (_ : Code Nat) : Code Nat := `⟨2⟩
+
+#guard_staged ~(nestedSpliceFunF fun x => ~(nestedSpliceCodeG `⟨x⟩)) =ₛ 1
+
+def nestedSpliceCodeG₂ (_ _ : Code Nat) : Code Nat := `⟨2⟩
+
+/-- error: staging error: variable `y` is not available in the current staging context -/
+#guard_msgs in
+def illStagedNestedSplice (y : Nat) : Nat :=
+  ~(nestedSpliceFunF fun x => ~(nestedSpliceCodeG₂ `⟨x⟩ `⟨y⟩))
+
+/-- error: staging error: multi-level staging is not supported -/
+#guard_msgs in
+def unsupportedNestedCode (_ : Code (Code Nat)) : Unit := ()
+
+/-- error: staging error: multi-level staging is not supported -/
+#guard_msgs in
+def unsupportedNestedQuote := `⟨`⟨1⟩⟩
 
 def stagedId (α : Code (Sort u)) : Code (~α → ~α) :=
   `⟨fun x => x⟩
@@ -151,33 +164,23 @@ def finType (n : Code Nat) : Code Type :=
 generated:
   41 + 1
 denotation:
-  (opaqueImportedSucc («Code».quote 41)).val
+  (opaqueImportedSucc `⟨41⟩).den
 
 Note: The following definitions were not unfolded because their definition is not exposed:
-  opaqueImportedSucc ↦ 1 -/
+  opaqueImportedSucc ↦ 4 -/
 #guard_msgs in
 #check ~(opaqueImportedSucc `⟨41⟩)
 
-abbrev NatCode := Code Nat
-
-def viaTypeAlias : NatCode := `⟨5⟩
-
-#guard_staged ~viaTypeAlias =ₛ 5
-
-/-- error: stage mismatch: bound variable `x` is available at stage 1, but is used at stage 0 -/
-#guard_msgs in
-#check `⟨fun (x : Code Nat) => ~x⟩
-
 /-- Deliberately bypasses staging syntax to exercise the trusted generator boundary. -/
 def incoherent : Code Nat :=
-  Code.mk! (fun _ => 0) (.mk (pure (mkNatLit 1)))
+  Code.mk 0 (fun _ => .mk (pure (mkNatLit 1)))
 
-example : incoherent.val = 0 := rfl
+example : incoherent.den = 0 := rfl
 
 /-- error: generated code is not definitionally equal to its denotation
 generated:
   1
 denotation:
-  incoherent.val -/
+  incoherent.den -/
 #guard_msgs in
 #check ~incoherent
