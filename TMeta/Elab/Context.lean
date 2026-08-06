@@ -1,17 +1,14 @@
 module
 
-public meta import TMeta.Elab.Common
-public meta import Lean.Elab.Term.TermElabM
-public meta import TMeta.Code
+public import Lean.Elab.Term.TermElabM
+import TMeta.Elab.Common
 import TMeta.Code
 
 namespace TMeta.Elab
 
-meta section
-
 open Lean Elab Meta Term
 
-public def indexName : Name := `i
+def indexName : Name := `i
 
 def addTMetaScope (name : Name) : Name :=
   addMacroScope `_tmeta name reservedMacroScope
@@ -116,7 +113,7 @@ def resolveInterpretation (autoBind : Bool) : TermElabM Expr := do
     unless ← autoImplicit.getM do
       throwError "TMeta requires auto-bound implicits to elaborate staged code"
     throwAutoBoundImplicitLocal implicitIndexName
-  return toExpr Interpretation.den
+  return mkConst ``Interpretation.den
 
 /-- Enter a denotational context, returning whether it is newly owned, its
 interpretation and the stage of the operator that entered it. -/
@@ -175,7 +172,5 @@ public def getFVarStage (fvarId : FVarId) : MetaM Int := do
     return 0
   else
     throwError "invalid decl index"
-
-end
 
 end TMeta.Elab

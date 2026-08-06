@@ -11,7 +11,7 @@ public section
 inductive Interpretation where
   | den
   | gen
-  deriving DecidableEq, ToExpr
+  deriving DecidableEq
 
 @[class]
 inductive Den : Interpretation → Prop where

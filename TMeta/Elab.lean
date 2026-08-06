@@ -1,26 +1,41 @@
 module
 
-public import TMeta.Code
-public import TMeta.Elab.Runtime
 public meta import Lean.Elab.SyntheticMVars
 public meta import Lean.PrettyPrinter.Delaborator.Builtins
-public meta import Std.Do.Triple.SpecLemmas
-public meta import TMeta.Code
-public import TMeta.Elab.Common
-public import TMeta.Elab.Context
+public meta import TMeta.Elab.Context
+public meta import TMeta.Elab.Common
+public meta import TMeta.Elab.Check
+public meta import TMeta.Elab.Runtime
+public meta import TMeta.Elab.Transform
+public import TMeta.Code
+public import TMeta.Elab.Check
 public import TMeta.Elab.Transform
-import Lean.PrettyPrinter.Delaborator.Basic
+public import TMeta.Elab.Runtime
+public import TMeta.Elab.Lemmas
 
 open Lean Meta
 
 namespace TMeta.Elab
 
+public inductive PendingCodeCheck
+    (stage : Int)
+    (index : Interpretation)
+    (typeDen : [Den index] → Sort u) : Prop where
+  | done : PendingCodeCheck stage index typeDen
+
+public abbrev PendingQuoteAction
+    (_stage : Int)
+    (index : Interpretation)
+    (typeDen : [Den index] → Sort u)
+    (_den : [Den index] → typeDen) : Type :=
+  index = .gen → MetaM Expr
+
 meta section
 
-open Lean Lean.Elab Meta TMeta.Elab
+open Lean Elab Meta
 open Lean.Elab.Term hiding mkConst
 
-public meta register_option tmeta.checkCoherence : Bool := {
+public register_option tmeta.checkCoherence : Bool := {
   defValue := false
   descr := "check that generated code is definitionally equal to its denotation"
 }
@@ -29,8 +44,8 @@ def checkCoherence : Lean.Option Bool where
   name := `tmeta.checkCoherence
   defValue := false
 
-def isInterpretation (index : Expr) (interpretation : Interpretation) : MetaM Bool :=
-  withNewMCtxDepth <| isDefEq index (toExpr interpretation)
+def isDen (index : Expr) : MetaM Bool :=
+  withNewMCtxDepth <| isDefEq index (mkConst ``Interpretation.den)
 
 def ensureNoMVars (e : Expr) : TermElabM Unit := do
   if e.hasMVar then
@@ -66,12 +81,6 @@ def mkPendingTacticMVar
         .tactic tacticCode (← saveContext) .term (delayOnMVars := true)
       return goal)
 
-public inductive PendingCodeCheck
-    (stage : Int)
-    (index : Interpretation)
-    (typeDen : [Den index] → Sort u) : Prop where
-  | done : PendingCodeCheck stage index typeDen
-
 /-- `PendingCodeCheck.{u} stage index typeDen` -/
 @[match_pattern]
 def mkPendingCodeCheck (u : Level) (stage index typeDen : Expr) : Expr :=
@@ -86,13 +95,6 @@ def finalizeCodeCheck (target : Expr) : TermElabM Expr := do
   ensureNoMVars codeType
   checkStages codeType (startStage := stageValue)
   return mkApp3 (.const ``PendingCodeCheck.done [u]) stage index typeDen
-
-public abbrev PendingQuoteAction
-    (_stage : Int)
-    (index : Interpretation)
-    (typeDen : [Den index] → Sort u)
-    (_den : [Den index] → typeDen) : Type :=
-  index = .gen → MetaM Expr
 
 /-- `PendingQuoteAction.{u} stage index typeDen den` -/
 @[match_pattern]
@@ -124,7 +126,7 @@ def mkGen (u : Level) (stage : Int) (index typeDen den : Expr)
   let eq := mkEqGen index
   let lam body := .lam hGenName eq body .default
   if ownsContext then
-    unless ← isInterpretation index .den do
+    unless ← isDen index do
       let actionType := mkPendingQuoteAction u (mkRawIntLit stage) index typeDen den
       let action ← mkPendingTacticMVar actionType finalizeQuoteAction
       return lam (.app (mkConst ``Codegen.mk) (.app action (.bvar 0)))
@@ -146,7 +148,7 @@ def elabCode : TermElab := fun stx expectedType? => do
     enterDenContext (autoBind := true) fun _ hDen =>
       elabDen hDen typeStx (.sort u)
   if ownsContext then
-    unless ← isInterpretation index .den do
+    unless ← isDen index do
       let checkType := mkPendingCodeCheck u (mkRawIntLit stage) index typeDen
       discard <| mkPendingTacticMVar checkType finalizeCodeCheck
   let code := mkCodeType u index typeDen
@@ -196,7 +198,7 @@ def elabSplice : TermElab := fun stx expectedType? => do
     let coeResult ← ensureHasType (some expectedType) result
     if ← checkCoherence.getM then
       let denotation ← splice.replaceFVarsM #[index, hDen]
-        #[toExpr Interpretation.den, mkConst ``Den.intro]
+        #[mkConst ``Interpretation.den, mkConst ``Den.intro]
       withNewMCtxDepth do
         unless ← isDefEq result denotation do
           let note ← mkUnfoldAxiomsNote result denotation

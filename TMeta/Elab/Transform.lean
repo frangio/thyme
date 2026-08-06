@@ -1,23 +1,20 @@
 module
 
-public meta import TMeta.Elab.Common
-public meta import TMeta.Elab.TypedOpTransform
-public meta import Lean.Elab.Term.TermElabM
-public meta import TMeta.Elab.Runtime
-public import TMeta.Elab.Check
-public import TMeta.Elab.Lemmas
-meta import Lean.Meta.Eval
+public import Lean.Elab.Term.TermElabM
+import TMeta.Elab.Common
+import TMeta.Elab.TypedOpTransform
+import TMeta.Elab.Check
+import TMeta.Elab.Lemmas
+import Lean.Meta.Eval
 import TMeta.Code
-meta import TMeta.Elab.Runtime
+import TMeta.Elab.Runtime
 
 namespace TMeta.Elab.Transform
 
-meta section
-
-open Lean Elab Meta TMeta.Elab
+open Lean Elab Meta
+open Lean.Elab.Term hiding mkConst
 open TMeta.Elab.Lemmas
 open TypedOpTransform
-open Lean.Elab.Term hiding mkConst
 
 unsafe def evalCodegenImpl (gen : Expr) : MetaM Expr := do
   let result ← evalExpr Codegen (mkConst ``Codegen) gen
@@ -374,7 +371,5 @@ public def compileQuote (stage : Int) (index quote : Expr) : TermElabM Expr := d
   let_expr Code.mk _ _ sourceDen _ := quote | throwInternalStagingError
   run <| TransformM.withQuoteAction index sourceDen fun hGen action => do
     mkLambdaFVars #[hGen] action
-
-end
 
 end TMeta.Elab.Transform
