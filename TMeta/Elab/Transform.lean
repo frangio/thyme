@@ -47,7 +47,6 @@ def maybeCast (a : Expr) (h? : Option Expr) : MetaM Expr :=
 
 structure QuoteState where
   spliceGens : Array Expr
-  spliceHoles : Array MVarId
   deriving Inhabited
 
 structure DenContext where
@@ -113,7 +112,7 @@ def enterQuoteContext (index : Expr) (k : Expr → TransformM α) : TransformM �
   let hGenName ← mkFreshUserName hGenName
   withLocalDeclD hGenName (mkEqGen index) fun hGen =>
     let hGen? := some hGen
-    let quote? := some ⟨#[], #[]⟩
+    let quote? := some ⟨#[]⟩
     withDenContext { index, hGen?, quote? } <| k hGen
 
 def escapeDenContext (k : Option Expr → TransformM α) : TransformM α := do
@@ -278,15 +277,9 @@ partial def withQuoteAction (index sourceDen : Expr)
   enterQuoteContext index fun hGen => do
     let body ← withLocalDecl hDenName hDenBI hDenType fun hDen => do
       transform .synth () (sourceBody.instantiate1 hDen)
-    let { spliceGens, spliceHoles, .. } ← getQuote
-    let template : QuoteTemplate := {
-      mctx := ← getMCtx
-      body := body.val
-      spliceHoles
-    }
+    let { spliceGens } ← getQuote
     let declName := (← getDeclName?).getD .anonymous
-    let templateIndex ← template.register declName
-    let spliceGens ← spliceGens.mapM instantiateMVars
+    let templateIndex ← registerQuoteTemplate declName body.val
     let spliceGens ← mkArrayLitOf (mkConst ``Codegen) spliceGens
     let action := mkApp3 (mkConst ``instantiateQuoteTemplate)
       (toExpr declName) (toExpr templateIndex) spliceGens
@@ -333,7 +326,6 @@ partial def transformSplice (dir : TypingDir) (expectedType? : dir.Input)
       let hole ← mkFreshExprMVar (some holeType.instantiate) .syntheticOpaque
       modifyQuote fun quote => { quote with
         spliceGens := quote.spliceGens.push gen
-        spliceHoles := quote.spliceHoles.push hole.mvarId!
       }
       return .mk hole holeType
     | none => do
