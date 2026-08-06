@@ -107,7 +107,7 @@ def finalizeQuoteAction (target : Expr) : TermElabM Expr := do
   let mkPendingQuoteAction u stage index typeDen den := target
     | throwError "malformed pending quotation action"
   let some stage := rawIntLit? stage | throwError "malformed pending quotation action"
-  let gen := .lam hGenName (mkEqGen index) (mkConst ``Codegen.stub) .default
+  let gen := .app (mkConst ``Codegen.stub) index
   let quote := mkCode u index typeDen den gen
   ensureNoMVars quote
   Transform.compileQuote stage index quote
@@ -123,14 +123,12 @@ action. Otherwise, return a stub generator.
 -/
 def mkGen (u : Level) (stage : Int) (index typeDen den : Expr)
     (ownsContext : Bool) : TermElabM Expr := do
-  let eq := mkEqGen index
-  let lam body := .lam hGenName eq body .default
   if ownsContext then
     unless ← isDen index do
       let actionType := mkPendingQuoteAction u (mkRawIntLit stage) index typeDen den
       let action ← mkPendingTacticMVar actionType finalizeQuoteAction
-      return lam (.app (mkConst ``Codegen.mk) (.app action (.bvar 0)))
-  return lam (mkConst ``Codegen.stub)
+      return mkApp2 (mkConst ``Codegen.mk) index action
+  return .app (mkConst ``Codegen.stub) index
 
 public section
 

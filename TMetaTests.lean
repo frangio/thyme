@@ -173,7 +173,7 @@ Note: The following definitions were not unfolded because their definition is no
 
 /-- Deliberately bypasses staging syntax to exercise the trusted generator boundary. -/
 def incoherent : Code Nat :=
-  Code.mk 0 (fun _ => .mk (pure (mkNatLit 1)))
+  Code.mk 0 (.mk fun _ => pure (mkNatLit 1))
 
 example : incoherent.den = 0 := rfl
 

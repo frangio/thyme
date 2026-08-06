@@ -6,6 +6,7 @@ import TMeta.Elab.TypedOpTransform
 import TMeta.Elab.Check
 import TMeta.Elab.Lemmas
 import Lean.Meta.Eval
+import Lean.Util.CollectMVars
 import TMeta.Code
 import TMeta.Elab.Runtime
 
@@ -16,12 +17,15 @@ open Lean.Elab.Term hiding mkConst
 open TMeta.Elab.Lemmas
 open TypedOpTransform
 
-unsafe def evalCodegenImpl (gen : Expr) : MetaM Expr := do
-  let result ← evalExpr Codegen (mkConst ``Codegen) gen
-  result.run
+unsafe def evalCodegenImpl (codegen : Expr) : MetaM Expr := do
+  let codegen ← evalExpr
+    (Codegen .gen)
+    (.app (mkConst ``Codegen) (mkConst ``Interpretation.gen))
+    codegen
+  codegen.run rfl
 
 @[implemented_by evalCodegenImpl]
-opaque evalCodegen (gen : Expr) : MetaM Expr
+opaque evalCodegen (codegen : Expr) : MetaM Expr
 
 /-- `#[xs[0], ..., xs[n]] : Array type` -/
 def mkArrayLitOf (type : Expr) (xs : Array Expr) : MetaM Expr := do
@@ -126,6 +130,24 @@ def escapeDenContext (k : Option Expr → TransformM α) : TransformM α := do
   return result
 
 namespace TransformM
+
+structure PendingHole where
+  mvarId : MVarId
+  pendingMVarId : MVarId
+  fvars : Array Expr
+  index : Nat
+
+def getPendingHoles (body : Expr) : MetaM (Array PendingHole) := do
+  let mvarIds := body.collectMVars {} |>.result
+  let holes ← mvarIds.mapM fun mvarId => do
+    let (pendingMVarId, fvars) ← match ← getDelayedMVarAssignment? mvarId with
+      | some { mvarIdPending, fvars } => pure (mvarIdPending, fvars)
+      | none => pure (mvarId, #[])
+    if ← pendingMVarId.isDelayedAssigned then
+      throwError "unexpected delayed metavariable chain"
+    let index := (← pendingMVarId.getDecl).index
+    return { mvarId, pendingMVarId, fvars, index : PendingHole }
+  return holes.qsort fun a b => a.index < b.index
 
 structure ForallEq where
   domainEq? : Option Expr
@@ -270,20 +292,20 @@ partial def transformCode (dir : TypingDir) (expectedType? : dir.Input)
   let e := mkApp2 fn index typeDen
   coeResultM coerce expectedType? e false (inferType e)
 
-partial def withQuoteAction (index sourceDen : Expr)
-    (k : (hGen action : Expr) → TransformM α) : TransformM α := do
+partial def mkQuoteAction (index sourceDen : Expr) : TransformM Expr := do
   let .lam hDenName hDenType sourceBody hDenBI := sourceDen
     | throwInternalStagingError
   enterQuoteContext index fun hGen => do
     let body ← withLocalDecl hDenName hDenBI hDenType fun hDen => do
       transform .synth () (sourceBody.instantiate1 hDen)
-    let { spliceGens } ← getQuote
-    let declName := (← getDeclName?).getD .anonymous
-    let templateIndex ← registerQuoteTemplate declName body.val
-    let spliceGens ← mkArrayLitOf (mkConst ``Codegen) spliceGens
-    let action := mkApp3 (mkConst ``instantiateQuoteTemplate)
-      (toExpr declName) (toExpr templateIndex) spliceGens
-    k hGen action
+    let { spliceGens, .. } ← getQuote
+    let holes ← getPendingHoles body.val
+    let template := body.val.abstract (holes.map (.mvar ·.mvarId))
+    let spliceFVars := holes.map (·.fvars)
+    let instantiateTemplate ← registerQuoteTemplate template spliceFVars
+    let spliceGens ← mkArrayLitOf (.app (mkConst ``Codegen) index) spliceGens
+    let action := mkApp3 instantiateTemplate index hGen spliceGens
+    mkLambdaFVars #[hGen] action
 
 partial def transformQuote (dir : TypingDir) (expectedType? : dir.Input)
     (quoteFn : Expr) (args : Vector Expr 4) : TransformM (dir.Result Expr) := do
@@ -291,8 +313,8 @@ partial def transformQuote (dir : TypingDir) (expectedType? : dir.Input)
   let index := args[0]
   let sourceTypeDen := args[1]
   let sourceDen := args[2]
-  let gen ← withQuoteAction index sourceDen fun hGen action => do
-    mkLambdaFVars #[hGen] (.app (mkConst ``Codegen.mk) action)
+  let action ← mkQuoteAction index sourceDen
+  let gen := mkApp2 (mkConst ``Codegen.mk) index action
   if let some { hGen, .. } ← getGenContext? then
     let typeDen ← if let some expectedType := expectedType?.toOption then
       let expectedType ← whnf expectedType.instantiate
@@ -321,7 +343,7 @@ partial def transformSplice (dir : TypingDir) (expectedType? : dir.Input)
       let typeDen := mkDenElimType u index hGen
       let bodyType := mkCodeType u index typeDen
       let body ← transform .check (.ofChangedExpr bodyType) sourceBody
-      let gen := mkApp4 (mkConst ``Code.gen [u]) index typeDen body hGen
+      let gen := mkApp3 (mkConst ``Code.gen [u]) index typeDen body
       let holeType := expectedType?.toOption.getD sourceType
       let hole ← mkFreshExprMVar (some holeType.instantiate) .syntheticOpaque
       modifyQuote fun quote => { quote with
@@ -360,17 +382,16 @@ public def evaluateSplice (stage : Int) (index splice : Expr) : TermElabM Expr :
       let elimType := mkDenElimType u index hGen
       let bodyType := mkCodeType u index elimType
       let body ← TransformM.transform .check (.ofChangedExpr bodyType) sourceBody
-      let gen := mkApp4 (mkConst ``Code.gen [u]) index elimType body hGen
+      let codegen := mkApp3 (mkConst ``Code.gen [u]) index elimType body
       let genIndex := mkConst ``Interpretation.gen
       let genIndexRefl := mkApp2 (mkConst ``Eq.refl [.one])
         (mkConst ``Interpretation) genIndex
-      let gen := gen.replaceFVars #[index, hGen] #[genIndex, genIndexRefl]
-      evalCodegen gen
+      let codegen := codegen.replaceFVars #[index, hGen] #[genIndex, genIndexRefl]
+      evalCodegen codegen
 
 public def compileQuote (stage : Int) (index quote : Expr) : TermElabM Expr := do
   checkStages quote (startStage := stage)
   let_expr Code.mk _ _ sourceDen _ := quote | throwInternalStagingError
-  run <| TransformM.withQuoteAction index sourceDen fun hGen action => do
-    mkLambdaFVars #[hGen] action
+  run <| TransformM.mkQuoteAction index sourceDen
 
 end TMeta.Elab.Transform

@@ -1,6 +1,6 @@
 module
 
-public import TMeta.Codegen
+public import Lean.Meta.Basic
 
 open Lean Meta
 
@@ -41,14 +41,40 @@ theorem heq_of_gen
 
 end Den
 
+def Codegen (i : Interpretation) := Squash (i = .gen → MetaM Expr)
+
+namespace Codegen
+
+instance : Subsingleton (Codegen i) :=
+  inferInstanceAs (Subsingleton (Squash _))
+
+opaque stub : Codegen i :=
+  .mk fun _ => throwError "missing code generator"
+
+private def mkImpl (action : i = .gen → MetaM Expr) : Codegen i :=
+  .mk action
+
+@[implemented_by mkImpl]
+abbrev mk (action : i = .gen → MetaM Expr) : Codegen i :=
+  stub
+
+private unsafe def runImpl : Codegen i → i = .gen → MetaM Expr :=
+  let α := i = .gen → MetaM Expr
+  @unsafeCast (Squash α) α
+
+@[implemented_by runImpl]
+opaque run : Codegen i → i = .gen → MetaM Expr
+
+end Codegen
+
 structure Code (i : Interpretation) (α : [Den i] → Sort u) where
   den : [Den i] → α
-  gen : i = .gen → Codegen := fun _ => .stub
+  gen : Codegen i := .stub
 
 unif_hint (i : Interpretation) (h : Den i) (α : Sort u)
     (code : Code i (fun [Den i] => α))
     (a den : α) where
-  code ≟ .mk (fun [Den i] => den) (fun _ => .stub)
+  code ≟ .mk (fun [Den i] => den) .stub
   den ≟ a
   ⊢ @code.den h ≟ a
 
@@ -57,11 +83,11 @@ namespace Code
 @[simp↓]
 theorem eq_canonical {i : Interpretation} {α : [Den i] → Sort u}
     (den : [Den i] → α) (action : i = .gen → MetaM Expr) :
-  mk @den (fun hGen => .mk (action hGen)) = mk @den (fun _ => .stub) := rfl
+  mk @den (.mk action) = mk @den .stub := rfl
 
 theorem eq_canonical' {i : Interpretation} {α : [Den i] → Sort u}
-    (den : [Den i] → α) (gen : (i = .gen) → Codegen) :
-    mk @den @gen = mk @den (fun _ => .stub) := by
+    (den : [Den i] → α) (gen : Codegen i) :
+    mk @den @gen = mk @den .stub := by
   congr
   apply Subsingleton.elim
 
