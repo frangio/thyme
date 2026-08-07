@@ -28,12 +28,11 @@ unsafe def evalCodegenImpl (codegen : Expr) : MetaM Expr := do
 opaque evalCodegen (codegen : Expr) : MetaM Expr
 
 /-- `#[xs[0], ..., xs[n]] : Array type` -/
-def mkArrayLitOf (type : Expr) (xs : Array Expr) : MetaM Expr := do
-  let u ← getDecLevel type
+def mkArrayLitOf (u : Level) (type : Expr) (xs : Array Expr) : Expr :=
   let nil := .app (mkConst ``List.nil [u]) type
   let cons := .app (mkConst ``List.cons [u]) type
   let list := xs.foldr (mkApp2 cons) nil
-  return mkApp2 (mkConst ``List.toArray [u]) type list
+  mkApp2 (mkConst ``List.toArray [u]) type list
 
 def expandProjection (e : Expr) : MetaM Expr := do
   let .proj structName idx struct := e | return e
@@ -303,9 +302,9 @@ partial def mkQuoteAction (index sourceDen : Expr) : TransformM Expr := do
     let template := body.val.abstract (holes.map (.mvar ·.mvarId))
     let spliceFVars := holes.map (·.fvars)
     let instantiateTemplate ← registerQuoteTemplate template spliceFVars
-    let spliceGens ← mkArrayLitOf (.app (mkConst ``Codegen) index) spliceGens
-    let action := mkApp3 instantiateTemplate index hGen spliceGens
-    mkLambdaFVars #[hGen] action
+    let spliceActions := mkArrayLitOf .zero (.app (mkConst ``MetaM) (mkConst ``Expr)) <|
+      spliceGens.map (mkApp3 (mkConst ``Codegen.run) index · hGen)
+    mkLambdaFVars #[hGen] (.app instantiateTemplate spliceActions)
 
 partial def transformQuote (dir : TypingDir) (expectedType? : dir.Input)
     (quoteFn : Expr) (args : Vector Expr 4) : TransformM (dir.Result Expr) := do
