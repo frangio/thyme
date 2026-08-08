@@ -1,6 +1,6 @@
 module
 
-namespace TMeta.Elab.Lemmas
+namespace TMeta.Elab
 
 public section
 
@@ -44,4 +44,4 @@ theorem hfunext
 
 end
 
-end TMeta.Elab.Lemmas
+end TMeta.Elab

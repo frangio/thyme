@@ -4,28 +4,16 @@ public import Lean.Elab.Term.TermElabM
 import TMeta.Elab.Common
 import TMeta.Elab.TypedOpTransform
 import TMeta.Elab.Check
-import TMeta.Elab.Lemmas
 import Lean.Meta.Eval
-import Lean.Util.CollectMVars
 import TMeta.Code
 import TMeta.Elab.Runtime
+import TMeta.Elab.ProveEq
 
-namespace TMeta.Elab.Transform
+namespace TMeta.Elab
 
 open Lean Elab Meta
 open Lean.Elab.Term hiding mkConst
-open TMeta.Elab.Lemmas
 open TypedOpTransform
-
-unsafe def evalCodegenImpl (codegen : Expr) : MetaM Expr := do
-  let codegen ← evalExpr
-    (Codegen .gen)
-    (.app (mkConst ``Codegen) (mkConst ``Interpretation.gen))
-    codegen
-  codegen.run rfl
-
-@[implemented_by evalCodegenImpl]
-opaque evalCodegen (codegen : Expr) : MetaM Expr
 
 /-- `#[xs[0], ..., xs[n]] : Array type` -/
 def mkArrayLitOf (u : Level) (type : Expr) (xs : Array Expr) : Expr :=
@@ -34,236 +22,156 @@ def mkArrayLitOf (u : Level) (type : Expr) (xs : Array Expr) : Expr :=
   let list := xs.foldr (mkApp2 cons) nil
   mkApp2 (mkConst ``List.toArray [u]) type list
 
-def expandProjection (e : Expr) : MetaM Expr := do
-  let .proj structName idx struct := e | return e
-  let some info := getStructureInfo? (← getEnv) structName
-    | throwError "unknown structure '{structName}'"
-  let some fieldName := info.fieldNames[idx]?
-    | throwError "invalid projection index {idx} for structure '{structName}'"
-  mkProjection struct fieldName
-
-def maybeCast (a : Expr) (h? : Option Expr) : MetaM Expr :=
-  if let some h := h? then
-    mkAppM ``cast #[h, a]
-  else
-    pure a
-
-structure QuoteState where
-  spliceGens : Array Expr
-  deriving Inhabited
-
-structure DenContext where
-  index : Expr
-  hGen? : Option Expr := none
-  quote? : Option QuoteState := none
-  isEscaped : Bool := false
-  deriving Inhabited
-
-structure GenContext where
-  index : Expr
-  hGen : Expr
-
-abbrev TransformState := Option DenContext
-
-abbrev TransformM := StateRefT TransformState (StateRefT TypeChangedFVarSet TermElabM)
-
-instance : Inhabited (TransformM α) := ⟨throw default⟩
-
 def throwInternalStagingError [Monad m] [MonadError m] : m α :=
   throwError "internal staging error"
 
-def getGenContext? : TransformM (Option GenContext) := do
-  match ← get with
-  | some { index, hGen? := some hGen, isEscaped := true, .. } =>
-    return some { index, hGen }
-  | _ =>
-    return none
+def metaMExprType : Expr := .app (mkConst ``MetaM) (mkConst ``Expr)
 
-def modifyGetDenContext (f : DenContext → TermElabM (α × DenContext)) : TransformM α := do
-  let some context ← modifyGet fun context? => (context?, none)
-    | throwInternalStagingError
-  let (result, context) ← f context
-  set (some context)
-  return result
+/--
+An alternating quote/splice tree. `body` contains one synthetic opaque
+metavariable hole per child. `children` maps each child's original metavariable to
+its tree. Those metavariables may hot occur directly in `body` as they may be
+behind delayed assignments.
+-/
+structure StagingTree where
+  body : Expr
+  children : Std.HashMap.Raw MVarId StagingTree
 
-def getQuote : TransformM QuoteState := do
-  match ← get with
-  | some { quote? := some quote, isEscaped := false, .. } =>
-    return quote
-  | _ =>
-    throwInternalStagingError
+abbrev Children := Std.HashMap.Raw MVarId StagingTree
 
-def modifyQuote (f : QuoteState → QuoteState) : TransformM Unit := do
-  modifyGetDenContext fun context => do
-    let { quote? := some quote, isEscaped := true, .. } := context
-      | throwInternalStagingError
-    return ((), { context with quote? := some (f quote) })
-
-def withDenContext (context : DenContext) (k : TransformM α) : TransformM α := do
-  let suspended? ← get
-  if let some { isEscaped := false, .. } := suspended? then
-    throwError "staging error: multi-level staging is not supported"
-  set (some context)
-  let result ← k
-  set suspended?
-  return result
-
-def enterCodeContext (index : Expr) (k : TransformM α) : TransformM α :=
-  withDenContext { index } k
-
-def enterQuoteContext (index : Expr) (k : Expr → TransformM α) : TransformM α := do
-  let hGenName ← mkFreshUserName hGenName
-  withLocalDeclD hGenName (mkEqGen index) fun hGen =>
-    let hGen? := some hGen
-    let quote? := some ⟨#[]⟩
-    withDenContext { index, hGen?, quote? } <| k hGen
-
-def escapeDenContext (k : Option Expr → TransformM α) : TransformM α := do
-  let hGen? ← modifyGetDenContext fun context => do
-    if context.isEscaped then
-      throwInternalStagingError
-    return (context.hGen?, { context with isEscaped := true })
-  let result ← k hGen?
-  modifyGetDenContext fun context =>
-    return ((), { context with isEscaped := false })
-  return result
-
-namespace TransformM
-
-structure PendingHole where
+structure PendingChild where
   mvarId : MVarId
-  pendingMVarId : MVarId
+  originalMVarId : MVarId
   fvars : Array Expr
-  index : Nat
+  child : StagingTree
 
-def getPendingHoles (body : Expr) : MetaM (Array PendingHole) := do
+def StagingTree.unpack (tree : StagingTree) : MetaM (Expr × Array PendingChild) := do
+  let { body, children } := tree
+  let body ← instantiateMVars body
   let mvarIds := body.collectMVars {} |>.result
+  unless mvarIds.size = children.size do
+    throwInternalStagingError
   let holes ← mvarIds.mapM fun mvarId => do
-    let (pendingMVarId, fvars) ← match ← getDelayedMVarAssignment? mvarId with
+    let (originalMVarId, fvars) ← match ← getDelayedMVarAssignment? mvarId with
       | some { mvarIdPending, fvars } => pure (mvarIdPending, fvars)
       | none => pure (mvarId, #[])
-    if ← pendingMVarId.isDelayedAssigned then
+    if ← originalMVarId.isDelayedAssigned then
       throwError "unexpected delayed metavariable chain"
-    let index := (← pendingMVarId.getDecl).index
-    return { mvarId, pendingMVarId, fvars, index : PendingHole }
-  return holes.qsort fun a b => a.index < b.index
+    let some child := children[originalMVarId]?
+      | throwInternalStagingError
+    return { mvarId, originalMVarId, fvars, child }
+  return (body, holes)
 
-structure ForallEq where
-  domainEq? : Option Expr
-  domainEq : Expr
-  codomainEq : Expr
-  targetFamily : Expr
-  forallEq? : Option Expr
+mutual
+
+partial def buildQuote (tree : StagingTree) (freshCaptures : Array Expr)
+    (quoteCaptures : Array Expr) : TermElabM Expr := do
+  let (body, spliceHoles) ← tree.unpack
+  let exprType := mkConst ``Expr
+  let spliceActions ← spliceHoles.mapM fun hole => do
+    let captureNames ← hole.originalMVarId.withContext do
+      hole.fvars.mapM (·.fvarId!.getUserName)
+    withLocalDeclD `fresh (.app (mkConst ``Array [.zero]) exprType) fun fresh => do
+      let spliceAction ←
+        buildSplice hole.child (freshCaptures.push fresh) (quoteCaptures ++ hole.fvars)
+      let spliceAction ← mkLambdaFVars #[fresh] spliceAction
+      pure (mkApp2 (mkConst ``mkLambdaFreshFVars) (toExpr captureNames) spliceAction)
+  let spliceActions := mkArrayLitOf .zero metaMExprType spliceActions
+  let captures := freshCaptures.foldl
+    (mkApp3 (.const ``Array.append [.zero]) exprType)
+    (.app (.const ``Array.empty [.zero]) exprType)
+  let template := body.abstract (quoteCaptures ++ spliceHoles.map (.mvar ·.mvarId))
+  let instantiateTemplate ← registerQuoteTemplate template
+  return mkApp2 instantiateTemplate captures spliceActions
+
+partial def buildSplice (tree : StagingTree) (freshCaptures : Array Expr)
+    (quoteCaptures : Array Expr) : TermElabM Expr := do
+  let (body, quoteHoles) ← tree.unpack
+  for hole in quoteHoles do
+    let quote ← buildQuote hole.child freshCaptures quoteCaptures
+    hole.originalMVarId.assign quote
+  instantiateMVars body
+
+end
+
+inductive TransformState where
+  | initial
+  | code
+  | quote (children : Children)
+  | splice (children? : Option Children)
+  deriving Inhabited
+
+abbrev TransformM :=
+  StateRefT TransformState (StateRefT TypeChangedFVarSet TermElabM)
+
+instance : Inhabited (TransformM α) := ⟨throw default⟩
+
+def swapTransformState (s : TransformState) : TransformM TransformState :=
+  modifyGet (·, s)
+
+def isGenContext : TransformM Bool := do
+  return (← get) matches .splice (some _)
+
+def enterCodeContext (k : TransformM α) : TransformM α := do
+  let suspended ← swapTransformState .code
+  if suspended matches .code | .quote _ then
+    throwMultiLevelStagingError
+  let result ← k
+  set suspended
+  return result
+
+def enterQuoteContext (k : TransformM α) : TransformM (α × Children) := do
+  let suspended ← swapTransformState (.quote {})
+  if suspended matches .code | .quote _ then
+    throwMultiLevelStagingError
+  let result ← k
+  let .quote children ← swapTransformState suspended
+    | throwInternalStagingError
+  return (result, children)
+
+def enterSpliceContext (k : TransformM α) : TransformM α := do
+  let suspended ← get
+  let children? ← match suspended with
+    | .initial | .quote _ => pure (some {})
+    | .code => pure none
+    | .splice _ => throwInternalStagingError
+  let state : TransformState := .splice children?
+  set state
+  let result ← k
+  let .splice _ ← swapTransformState suspended
+    | throwInternalStagingError
+  return result
+
+def recordChild (type : Expr) (child : StagingTree) : TransformM Expr := do
+  let hole ← mkFreshExprMVar (some type) .syntheticOpaque
+  let ok ← modifyGetThe TransformState fun
+    | .quote children =>
+      (true, .quote (children.insert hole.mvarId! child))
+    | .splice (some children) =>
+      (true, .splice (some (children.insert hole.mvarId! child)))
+    | s =>
+      (false, s)
+  unless ok do
+    throwInternalStagingError
+  return hole
+
+namespace TransformM
 
 mutual
 
 variable (index hGen : Expr)
 
-/-- Returns a proof that a source expression equals its generative staging
-translation. -/
-partial def proveEq (source target : Expr) : MetaM Expr := do
-  (← proveEq? source target).getDM (mkEqRefl source)
-
-partial def proveEq? (source target : Expr) : MetaM (Option Expr) := do
-  (← proveHEq? source target).mapM mkEqOfHEq
-
-/-- Returns a proof that a source expression is heterogeneously equal to its
-generative staging translation. -/
-partial def proveHEq (source target : Expr) : MetaM Expr := do
-  (← proveHEq? source target).getDM (mkHEqRefl source)
-
-partial def proveForallEq (source target : Expr) : MetaM ForallEq := do
-  match source, target with
-  | .forallE name sourceDomain sourceCodomain _,
-      .forallE _ targetDomain targetCodomain _ =>
-    let domainEq? ← proveEq? sourceDomain targetDomain
-    let domainEq ← domainEq?.getDM (mkEqRefl sourceDomain)
-    let (codomainEq, codomainIsDefEq) ← withLocalDeclD name sourceDomain fun arg => do
-        let codomainEq? ← proveEq?
-          (sourceCodomain.instantiate1 arg)
-          (targetCodomain.instantiate1 (← maybeCast arg domainEq?))
-        let codomainEq ← codomainEq?.getDM (mkEqRefl (sourceCodomain.instantiate1 arg))
-        return (← mkLambdaFVars #[arg] codomainEq, codomainEq?.isNone)
-    let targetFamily := .lam name targetDomain targetCodomain .default
-    let forallEq? ←
-      if domainEq?.isNone && codomainIsDefEq then
-        pure none
-      else
-        some <$> mkAppM ``pi_congr' #[targetFamily, domainEq, codomainEq]
-    return { domainEq?, domainEq, codomainEq, targetFamily, forallEq? }
-  | _, _ =>
-    throwError "function expected"
-
-partial def proveHEq? (source target : Expr) : MetaM (Option Expr) := do
-  if ← isDefEq source target then
-    return none
-  let sourceType ← whnf (← inferType source)
-  let targetType ← whnf (← inferType target)
-  match sourceType, targetType with
-  | mkApp2 (.const ``Code _) _ _, mkApp2 (.const ``Code _) _ _ =>
-    return ← mkAppM ``Code.heq_of_gen #[hGen, source, target]
-  | .forallE _ sourceDomain _ _, .forallE _ targetDomain _ _ =>
-    let denType := mkDenType index
-    if ← isDefEq sourceDomain denType then
-      if ← isDefEq targetDomain denType then
-        return ← mkAppM ``Den.heq_of_gen #[hGen, source, target]
-  | _, _ => pure ()
-  match source, target with
-  | source@(.forallE ..), target@(.forallE ..) => do
-    let { forallEq?, .. } ← proveForallEq source target
-    mkHEqOfEq <| ← forallEq?.getDM (mkEqRefl source)
-  | .lam name sourceDomain sourceBody _,
-      .lam _ targetDomain targetBody _ =>
-    let .forallE _ _ targetCodomain _ := targetType
-      | throwError "function expected"
-    let domainEq? ← proveEq? sourceDomain targetDomain
-    let bodyHEq ← withLocalDeclD name sourceDomain fun arg => do
-      mkLambdaFVars #[arg] <| ← proveHEq
-        (sourceBody.instantiate1 arg)
-        (targetBody.instantiate1 (← maybeCast arg domainEq?))
-    let domainEq ← domainEq?.getDM (mkEqRefl sourceDomain)
-    let targetFamily := .lam name targetDomain targetCodomain .default
-    mkAppM ``hfunext #[targetFamily, target, domainEq, bodyHEq]
-  | mkApp4 (.const ``cast _) _ _ h source, target =>
-    mkHEqTrans
-      (← mkAppM ``cast_heq #[h, source])
-      (← proveHEq source target)
-  | source, mkApp4 (.const ``cast _) _ _ h target =>
-    mkHEqTrans
-      (← proveHEq source target)
-      (← mkHEqSymm (← mkAppM ``cast_heq #[h, target]))
-  | .app sourceFn sourceArg, .app targetFn targetArg => do
-    let sourceFnType ← whnf (← inferType sourceFn)
-    let targetFnType ← whnf (← inferType targetFn)
-    let { domainEq?, domainEq, codomainEq, targetFamily, forallEq? } ←
-      proveForallEq sourceFnType targetFnType
-    let fnEq ← proveEq (← maybeCast sourceFn forallEq?) targetFn
-    let argEq ← proveEq (← maybeCast sourceArg domainEq?) targetArg
-    mkAppM ``app_hcongr #[targetFamily, domainEq, codomainEq, fnEq, argEq]
-  | .proj .., _ | _, .proj .. =>
-    proveHEq (← expandProjection source) (← expandProjection target)
-  | .mdata .., _ | _, .mdata .. =>
-    proveHEq source.consumeMData target.consumeMData
-  | .letE .., _ | _, .letE .. =>
-    proveHEq (expandLet source #[]) (expandLet target #[])
-  | _, _ =>
-    throwError "failed to prove staging-induced heterogeneous equality between{indentExpr source}\nand{indentExpr target}"
-
-end
-
-mutual
+partial def transform (dir : TypingDir) (expected : dir.Input) (e : Expr) :
+    TransformM (dir.Result Expr) :=
+  TypedOpTransform.transform getOpAppTransform coerce dir expected e
 
 partial def coerce (e : Expr) (sourceType targetType : Closure) :
     TransformM Expr := do
-  if let some { index, hGen } ← getGenContext? then
+  if ← isGenContext then
     maybeCast e (← proveEq? index hGen
       sourceType.instantiate targetType.instantiate)
   else
     return e
-
-partial def transform (dir : TypingDir) (expected : dir.Input) (e : Expr) :
-    TransformM (dir.Result Expr) :=
-  TypedOpTransform.transform getOpAppTransform coerce dir expected e
 
 partial def getOpAppTransform : Name → TypedOpTransform.OpAppTransform TransformM
   | name =>
@@ -276,121 +184,123 @@ partial def getOpAppTransform : Name → TypedOpTransform.OpAppTransform Transfo
     else
       .default
 
-partial def transformCode (dir : TypingDir) (expectedType? : dir.Input)
+partial def transformCode (dir : TypingDir) (_ : dir.Input)
     (fn : Expr) (args : Vector Expr 2) : TransformM (dir.Result Expr) := do
   let .const _ [u] := fn | unreachable!
-  let index := args[0]
   let sourceTypeDen := args[1]
   let typeDen ←
-    if let some { hGen, .. } ← getGenContext? then
+    if ← isGenContext then
       pure (mkDenElimType u index hGen)
     else
-      let typeDen ← enterCodeContext index do
+      let typeDen ← enterCodeContext do
         transform .synth () sourceTypeDen
       pure typeDen.val
-  let e := mkApp2 fn index typeDen
-  coeResultM coerce expectedType? e false (inferType e)
+  return .mk (mkApp2 fn index typeDen)
+    (.ofUnchangedExpr (.sort (mkLevelMax' .one u)))
 
-partial def mkQuoteAction (index sourceDen : Expr) : TransformM Expr := do
+partial def transformQuoteTree (sourceDen : Expr) : TransformM StagingTree := do
   let .lam hDenName hDenType sourceBody hDenBI := sourceDen
     | throwInternalStagingError
-  enterQuoteContext index fun hGen => do
+  let (body, children) ← enterQuoteContext do
     let body ← withLocalDecl hDenName hDenBI hDenType fun hDen => do
       transform .synth () (sourceBody.instantiate1 hDen)
-    let { spliceGens, .. } ← getQuote
-    let holes ← getPendingHoles body.val
-    let template := body.val.abstract (holes.map (.mvar ·.mvarId))
-    let spliceFVars := holes.map (·.fvars)
-    let instantiateTemplate ← registerQuoteTemplate template spliceFVars
-    let spliceActions := mkArrayLitOf .zero (.app (mkConst ``MetaM) (mkConst ``Expr)) <|
-      spliceGens.map (mkApp3 (mkConst ``Codegen.run) index · hGen)
-    mkLambdaFVars #[hGen] (.app instantiateTemplate spliceActions)
+    return body.val
+  return { body, children }
 
 partial def transformQuote (dir : TypingDir) (expectedType? : dir.Input)
     (quoteFn : Expr) (args : Vector Expr 4) : TransformM (dir.Result Expr) := do
   let .const _ [u] := quoteFn | unreachable!
-  let index := args[0]
-  let sourceTypeDen := args[1]
   let sourceDen := args[2]
-  let action ← mkQuoteAction index sourceDen
+  unless ← isGenContext do
+    throwInternalStagingError
+  let tree ← transformQuoteTree sourceDen
+  let actionBody ← recordChild metaMExprType tree
+  let action ← mkLambdaFVars #[hGen] actionBody
   let gen := mkApp2 (mkConst ``Codegen.mk) index action
-  if let some { hGen, .. } ← getGenContext? then
-    let typeDen ← if let some expectedType := expectedType?.toOption then
-      let expectedType ← whnf expectedType.instantiate
-      let_expr Code _ expectedTypeDen := expectedType
-        | throwInternalStagingError
-      pure expectedTypeDen
-    else
-      pure (mkDenElimType u index hGen)
-    let den := mkApp3 (mkConst ``Den.elim [u]) index typeDen hGen
-    let e := mkCode u index typeDen den gen
-    return .mk e (.ofChangedExpr (mkCodeType u index typeDen))
-  else
-    let e := mkCode u index sourceTypeDen sourceDen gen
-    return .mk e (.ofUnchangedExpr (mkCodeType u index sourceTypeDen))
+  let expectedTypeDen? ← expectedType?.toOption.mapM fun expectedType => do
+    let expectedType ← whnf expectedType.instantiate
+    let_expr Code _ expectedTypeDen := expectedType
+      | throwInternalStagingError
+    pure expectedTypeDen
+  let typeDen := expectedTypeDen?.getD (mkDenElimType u index hGen)
+  let den := mkApp3 (mkConst ``Den.elim [u]) index typeDen hGen
+  return .mk (mkCode u index typeDen den gen)
+    (.ofChangedExpr (mkCodeType u index typeDen))
+
+partial def transformSpliceTree (u : Level) (sourceBody : Expr) :
+    TransformM StagingTree := do
+  unless ← isGenContext do
+    throwInternalStagingError
+  let typeDen := mkDenElimType u index hGen
+  let bodyType := mkCodeType u index typeDen
+  let body ← transform .check (.ofChangedExpr bodyType) sourceBody
+  let gen := mkApp3 (mkConst ``Code.gen [u]) index typeDen body
+  let body := mkApp3 (mkConst ``Codegen.run) index gen hGen
+  let .splice (some children) ← get | throwInternalStagingError
+  return { body, children }
 
 partial def transformSplice (dir : TypingDir) (expectedType? : dir.Input)
     (spliceFn : Expr) (args : Vector Expr 4) : TransformM (dir.Result Expr) := do
   let .const _ [u] := spliceFn | unreachable!
-  let index := args[0]
   let sourceTypeDen := args[1]
   let sourceBody := args[2]
   let hDen := args[3]
   let sourceType := .ofUnchangedExpr (← instantiateTypeDen sourceTypeDen hDen)
-  escapeDenContext fun
-    | some hGen => do
-      let typeDen := mkDenElimType u index hGen
-      let bodyType := mkCodeType u index typeDen
-      let body ← transform .check (.ofChangedExpr bodyType) sourceBody
-      let gen := mkApp3 (mkConst ``Code.gen [u]) index typeDen body
-      let holeType := expectedType?.toOption.getD sourceType
-      let hole ← mkFreshExprMVar (some holeType.instantiate) .syntheticOpaque
-      modifyQuote fun quote => { quote with
-        spliceGens := quote.spliceGens.push gen
-      }
-      return .mk hole holeType
-    | none => do
+  match ← get with
+  | .quote _ =>
+    let tree ← enterSpliceContext do
+      transformSpliceTree u sourceBody
+    let holeType := expectedType?.toOption.getD sourceType
+    let hole ← recordChild holeType.instantiate tree
+    return .mk hole holeType
+  | .code =>
+    enterSpliceContext do
       let bodyType := mkCodeType u index sourceTypeDen
       let body ← transform .check (.ofUnchangedExpr bodyType) sourceBody
       let e := mkApp4 spliceFn index sourceTypeDen body hDen
       coeResult coerce expectedType? e sourceType
+  | _ =>
+    throwInternalStagingError
 
 end
 
 end TransformM
 
-def run (x : TransformM α) : TermElabM α := do
+def runTransform (x : TransformM α) : TermElabM α := do
   let lctx ← instantiateLCtxMVars (← getLCtx)
-  let localInstances ← getLocalInstances
-  withLCtx lctx localInstances <| withMCtx {} <|
-    (x.run' none).run' {}
+  withLCtx' lctx <| withNewMCtxDepth <|
+    (x.run' .initial).run' {}
+
+unsafe def evalCodegenImpl (codegen : Expr) : MetaM Expr := do
+  let codegen ← evalExpr (Codegen .gen)
+    (.app (mkConst ``Codegen) (mkConst ``Interpretation.gen))
+    codegen
+  codegen.run rfl
+
+@[implemented_by evalCodegenImpl]
+opaque evalCodegen (codegen : Expr) : MetaM Expr
 
 public def evaluateSplice (stage : Int) (index splice : Expr) : TermElabM Expr := do
   checkStages splice index.fvarId? (startStage := stage)
   let_expr fn@Code.den _ _ sourceBody _ := splice | throwInternalStagingError
   let .const _ [u] := fn | unreachable!
-  run do
+  runTransform do
     let hGenName ← mkFreshUserName hGenName
     withLocalDeclD hGenName (mkEqGen index) fun hGen => do
-      let context : DenContext := {
-        index
-        hGen? := some hGen
-        isEscaped := true
-      }
-      set (some context)
-      let elimType := mkDenElimType u index hGen
-      let bodyType := mkCodeType u index elimType
-      let body ← TransformM.transform .check (.ofChangedExpr bodyType) sourceBody
-      let codegen := mkApp3 (mkConst ``Code.gen [u]) index elimType body
-      let genIndex := mkConst ``Interpretation.gen
-      let genIndexRefl := mkApp2 (mkConst ``Eq.refl [.one])
-        (mkConst ``Interpretation) genIndex
-      let codegen := codegen.replaceFVars #[index, hGen] #[genIndex, genIndexRefl]
-      evalCodegen codegen
+      enterSpliceContext do
+        let tree ← .transformSpliceTree index hGen u sourceBody
+        let action ← buildSplice tree #[] #[]
+        let action ← mkLambdaFVars #[hGen] action
+        let codegen := mkApp2 (mkConst ``Codegen.mk) index action
+        let genIndex := mkConst ``Interpretation.gen
+        let codegen := codegen.replaceFVars #[index] #[genIndex]
+        evalCodegen codegen
 
-public def compileQuote (stage : Int) (index quote : Expr) : TermElabM Expr := do
+public def compileQuote (stage : Int) (index hGen quote : Expr) : TermElabM Expr := do
   checkStages quote (startStage := stage)
   let_expr Code.mk _ _ sourceDen _ := quote | throwInternalStagingError
-  run <| TransformM.mkQuoteAction index sourceDen
+  runTransform do
+    let tree ← .transformQuoteTree index hGen sourceDen
+    buildQuote tree #[] #[]
 
-end TMeta.Elab.Transform
+end TMeta.Elab

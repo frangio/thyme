@@ -105,6 +105,23 @@ def sharePair (x : Code Nat) : Code (Nat × Nat) :=
 
 #guard_staged fun x => ~(sharePair `⟨x + x⟩) =ₛ fun x => let y := x + x; (y, y)
 
+def letCode (value : Code Nat) (body : Code Nat → Code Nat) : Code Nat :=
+  `⟨let x := ~value; ~(body `⟨x⟩)⟩
+
+#guard_staged
+  ~(letCode `⟨1⟩ fun x =>
+    letCode `⟨2⟩ fun y =>
+    `⟨~x + ~y⟩) =ₛ
+  let x := 1
+  let y := 2
+  x + y
+
+def captures (f : Nat → Code Nat → Code Nat → Code Nat) : Code Nat :=
+  `⟨let x := 0; ~(let y := 1; `⟨let z := 2; ~(f y `⟨x⟩ `⟨z⟩)⟩)⟩
+
+#guard_staged ~(captures (fun y => cond (y == 1))) =ₛ let  x := 0; let _z := 2; x
+#guard_staged ~(captures (fun y => cond (y != 1))) =ₛ let _x := 0; let  z := 2; z
+
 def dependentArg (x : Code Nat) (h : Code (~x = 0)) : Code { n : Nat // n = 0 } :=
   `⟨⟨~x, ~h⟩⟩
 

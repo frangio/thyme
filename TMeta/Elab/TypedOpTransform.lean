@@ -147,20 +147,9 @@ def Input (dir : TypingDir) : Type :=
   | .check => Closure
   | .synth => Unit
 
-namespace Input
-
-def toOption : {dir : TypingDir} → dir.Input → Option Closure
+def Input.toOption : {dir : TypingDir} → dir.Input → Option Closure
   | .check, expected => some expected
   | .synth, _ => none
-
-def map {dir : TypingDir} (input : dir.Input) (f : Closure → α) : Option α :=
-  input.toOption.map f
-
-def mapM [Applicative m] {dir : TypingDir}
-    (input : dir.Input) (f : Closure → m α) : m (Option α) :=
-  input.toOption.mapM f
-
-end Input
 
 @[expose]
 def Result (dir : TypingDir) (α : Type u) : Type u :=

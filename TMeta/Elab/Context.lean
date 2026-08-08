@@ -122,7 +122,7 @@ public def enterDenContext
     (autoBind := false) : TermElabM (Bool × Expr × Int × α) := do
   let (stage, entered?, escaped) ← getAmbient
   if entered?.isSome then
-    throwError "staging error: multi-level staging is not supported"
+    throwMultiLevelStagingError
   if let some (entry, escaped) ← listPop? escaped then
     let (index, hDen) ← viewEntry entry
     let result ← withMarker (stage + 1) (someEntry entry) escaped <|

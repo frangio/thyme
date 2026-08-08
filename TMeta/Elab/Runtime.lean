@@ -1,48 +1,47 @@
 module
 
-public import TMeta.Code
 public import Lean.Elab.Term.TermElabM
-import Lean.Meta.InferType
 
 open Lean Meta
 
 namespace TMeta.Elab
 
-structure QuoteTemplate where
-  body : Expr
-  spliceFVars : Array (Array Expr)
+/--
+Invokes the continuation with fresh free variables with the given names, then
+abstracts the result into a lambda. The variables carry dummy types in the
+local context and in the resulting lambda binders, so the term will be
+ill-typed until the binders are beta-instantiated away with appropriately typed
+values.
+-/
+public def mkLambdaFreshFVars (names : Array Name)
+    (k : Array Expr → MetaM Expr) : MetaM Expr := do
+  withLocalDeclsDND (names.map (·, .sort .zero)) fun fresh => do
+    mkLambdaFVars fresh (← k fresh)
 
-initialize quoteTemplatesExt : MapDeclarationExtension (Array QuoteTemplate) ←
+initialize quoteTemplatesExt : MapDeclarationExtension (Array Expr) ←
   mkMapDeclarationExtension (asyncMode := .local)
 
-def QuoteTemplate.instantiate (template : QuoteTemplate)
-    (splices : Array (MetaM Expr)) : MetaM Expr := do
-  if h : template.spliceFVars.size = splices.size then
-    let splices ← template.spliceFVars.mapFinIdxM fun i fvars hi => do
-      let value ← splices[i]
-      return fvars.size.repeat
-        (.lam .anonymous (.sort .zero) · .default)
-        (value.abstract fvars)
-    return template.body.instantiateBetaRevRange 0 splices.size splices
-  else
-    throwError "staged quote expected {template.spliceFVars.size} splices, got {splices.size}"
-
 public def instantiateQuoteTemplate (declName : Name) (templateIndex : Nat)
-    (splices : Array (MetaM Expr)) : MetaM Expr := do
+    (captures : Array Expr) (splices : Array (MetaM Expr)) : MetaM Expr := do
   let env ← getEnv
   let some template := quoteTemplatesExt.find? env declName |>.bind (·[templateIndex]?)
     | throwError "quote #{templateIndex} for `{.ofConstName declName}` not found"
-  template.instantiate splices
+  let splices ← splices.mapM id
+  let args := captures ++ splices
+  return template.instantiateBetaRevRange 0 args.size args
 
-/-- Registers a quote template and returns an expression of type
-`Array (MetaM Expr) → MetaM Expr`. -/
-public def registerQuoteTemplate (template : Expr)
-    (spliceFVars : Array (Array Expr)) : Lean.Elab.Term.TermElabM Expr := do
+/--
+Registers a quote template under the declaration being elaborated, and returns
+`instantiateQuoteTemplate` partially applied to the lookup parameters, with
+type `Array Expr → Array (MetaM Expr) → MetaM Expr`.
+-/
+public def registerQuoteTemplate (template : Expr) : Lean.Elab.Term.TermElabM Expr := do
+  if template.hasMVar then
+    throwError "internal staging error: quote template contains metavariables"
   let declName := (← Lean.Elab.Term.getDeclName?).getD .anonymous
   let templates := quoteTemplatesExt.find? (← getEnv) declName |>.getD #[]
   let index := templates.size
-  modifyEnv fun env =>
-    quoteTemplatesExt.insert env declName (templates.push ⟨template, spliceFVars⟩)
+  modifyEnv fun env => quoteTemplatesExt.insert env declName (templates.push template)
   return mkApp2 (mkConst ``instantiateQuoteTemplate) (toExpr declName) (toExpr index)
 
 end TMeta.Elab

@@ -27,8 +27,9 @@ public abbrev PendingQuoteAction
     (_stage : Int)
     (index : Interpretation)
     (typeDen : [Den index] → Sort u)
-    (_den : [Den index] → typeDen) : Type :=
-  index = .gen → MetaM Expr
+    (_den : [Den index] → typeDen)
+    (_hGen : index = .gen) : Type :=
+  MetaM Expr
 
 meta section
 
@@ -96,26 +97,26 @@ def finalizeCodeCheck (target : Expr) : TermElabM Expr := do
   checkStages codeType (startStage := stageValue)
   return mkApp3 (.const ``PendingCodeCheck.done [u]) stage index typeDen
 
-/-- `PendingQuoteAction.{u} stage index typeDen den` -/
+/-- `PendingQuoteAction.{u} stage index typeDen den hGen` -/
 @[match_pattern]
-def mkPendingQuoteAction (u : Level) (stage index typeDen den : Expr) : Expr :=
-  mkApp4 (.const ``PendingQuoteAction [u]) stage index typeDen den
+def mkPendingQuoteAction (u : Level) (stage index typeDen den hGen : Expr) : Expr :=
+  mkApp5 (.const ``PendingQuoteAction [u]) stage index typeDen den hGen
 
 /-- Finalize a pending quotation generator action. -/
 def finalizeQuoteAction (target : Expr) : TermElabM Expr := do
   let target ← instantiateMVars target
-  let mkPendingQuoteAction u stage index typeDen den := target
+  let mkPendingQuoteAction u stage index typeDen den hGen := target
     | throwError "malformed pending quotation action"
   let some stage := rawIntLit? stage | throwError "malformed pending quotation action"
   let gen := .app (mkConst ``Codegen.stub) index
   let quote := mkCode u index typeDen den gen
   ensureNoMVars quote
-  Transform.compileQuote stage index quote
+  compileQuote stage index hGen quote
 
 def evalSplice (stage : Int) (index splice : Expr) : TermElabM Expr := do
   let splice ← instantiateMVars splice
   ensureNoMVars splice
-  Transform.evaluateSplice stage index splice
+  evaluateSplice stage index splice
 
 /--
 For a context-owning quote that may be generative, create a pending generator
@@ -125,8 +126,12 @@ def mkGen (u : Level) (stage : Int) (index typeDen den : Expr)
     (ownsContext : Bool) : TermElabM Expr := do
   if ownsContext then
     unless ← isDen index do
-      let actionType := mkPendingQuoteAction u (mkRawIntLit stage) index typeDen den
-      let action ← mkPendingTacticMVar actionType finalizeQuoteAction
+      let hGenName ← mkFreshUserName hGenName
+      let action ← withLocalDeclD hGenName (mkEqGen index) fun hGen => do
+        let actionType :=
+          mkPendingQuoteAction u (mkRawIntLit stage) index typeDen den hGen
+        let actionBody ← mkPendingTacticMVar actionType finalizeQuoteAction
+        mkLambdaFVars #[hGen] actionBody
       return mkApp2 (mkConst ``Codegen.mk) index action
   return .app (mkConst ``Codegen.stub) index
 

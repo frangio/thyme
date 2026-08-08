@@ -12,6 +12,9 @@ public section
 def hDenName : Name := `hDen
 def hGenName : Name := `hGen
 
+def throwMultiLevelStagingError [Monad m] [MonadError m] : m α :=
+  throwError "staging error: multi-level staging is not supported"
+
 /-- `Den index` -/
 def mkDenType (index : Expr) : Expr :=
   .app (mkConst ``Den) index
@@ -26,7 +29,11 @@ def mkDenElimType (u : Level) (index hGen : Expr) : Expr :=
 
 /-- `typeDen hDen`, exposing a reducible family and its head beta redex. -/
 def instantiateTypeDen (typeDen hDen : Expr) : MetaM Expr := do
-  return .headBeta (.app (← whnf typeDen) hDen)
+  match ← whnf typeDen with
+  | .lam _ _ body _ =>
+    return body.instantiate1 hDen
+  | typeDen =>
+    return .app typeDen hDen
 
 /-- `Code.{u} index typeDen` -/
 def mkCodeType (u : Level) (index typeDen : Expr) : Expr :=
