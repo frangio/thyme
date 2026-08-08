@@ -163,14 +163,14 @@ def elabQuote : TermElab := fun stx expectedType? => do
   let expectedType ← expectedType?.getDM mkFreshTypeMVar
   let u ← mkFreshLevelMVar
   let typeIndex ← mkFreshExprMVar (some (mkConst ``Interpretation))
-  let typeDen ← mkFreshExprMVar (some (mkForallDen typeIndex (.sort u)))
-  let codeType := mkCodeType u typeIndex typeDen
-  discard <| isDefEq expectedType codeType
   let (ownsContext, index, stage, typeDen, den) ←
     enterDenContext fun contextIndex hDen => do
       discard <| isDefEq typeIndex contextIndex
-      let typeDen ← whnf typeDen
-      let den ← elabDen hDen bodyStx (← instantiateTypeDen typeDen hDen)
+      let typeDenBody ← mkFreshExprMVar (some (.sort u))
+      let typeDen ← mkLambdaFVars #[hDen] typeDenBody
+      let codeType := mkCodeType u typeIndex typeDen
+      discard <| isDefEq expectedType codeType
+      let den ← elabDen hDen bodyStx typeDenBody
       return (typeDen, den)
   let gen ← mkGen u stage index typeDen den ownsContext
   let quote := mkCode u index typeDen den gen

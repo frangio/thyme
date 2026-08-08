@@ -19,10 +19,6 @@ def throwMultiLevelStagingError [Monad m] [MonadError m] : m α :=
 def mkDenType (index : Expr) : Expr :=
   .app (mkConst ``Den) index
 
-/-- `[Den index] → bodyType` -/
-def mkForallDen (index bodyType : Expr) : Expr :=
-  .forallE hDenName (mkDenType index) bodyType .instImplicit
-
 /-- `Den.elimType index hGen` -/
 def mkDenElimType (u : Level) (index hGen : Expr) : Expr :=
   mkApp2 (.const ``Den.elimType [u]) index hGen
