@@ -31,13 +31,10 @@ theorem heq_of_gen
     (hGen : i = .gen)
     (a : [Den i] → α) (b : [Den i] → β) : @a ≍ @b := by
   subst i
-  have : @α = @β := by
-    funext hDen
-    nomatch hDen
+  have : @α = @β := funext nofun
   subst β
   apply heq_of_eq
-  funext hDen
-  nomatch hDen
+  exact funext nofun
 
 end Den
 
@@ -104,8 +101,7 @@ theorem funext
     {f g : (a : Code i @α) → β a}
     (h : ∀ (a : [Den i] → α), f { den := @a } = g { den := @a }) :
     f = g := by
-  funext c
-  rcases c with ⟨a⟩
+  funext ⟨a, _⟩
   rw [eq_canonical', h a]
 
 theorem heq_of_gen
@@ -115,14 +111,9 @@ theorem heq_of_gen
   have : @α₁ = @α₂ := eq_of_heq (Den.heq_of_gen hGen @α₁ @α₂)
   subst α₂
   apply heq_of_eq
-  subst i
-  cases a₁
-  cases a₂
-  congr
-  · funext hDen
-    nomatch hDen
-  · funext
-    apply Subsingleton.elim
+  ext1
+  apply eq_of_heq
+  apply Den.heq_of_gen hGen
 
 end Code
 
