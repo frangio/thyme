@@ -55,6 +55,7 @@ private def mkImpl (action : i = .gen → MetaM Expr) : Codegen i :=
 abbrev mk (action : i = .gen → MetaM Expr) : Codegen i :=
   stub
 
+@[noinline] -- https://github.com/leanprover/lean4/issues/14719
 private unsafe def runImpl : Codegen i → i = .gen → MetaM Expr :=
   let α := i = .gen → MetaM Expr
   @unsafeCast (Squash α) α
