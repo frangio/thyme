@@ -6,7 +6,7 @@ public import Lean.Meta.Basic
 
 open Lean Meta
 
-namespace TMeta.Elab.TypedOpTransform
+namespace Thyme.Elab.TypedOpTransform
 
 public abbrev TypeChangedFVarSet := FVarIdHashSet
 
@@ -449,4 +449,4 @@ partial def transformForall (dir : TypingDir) (expected : dir.Input)
 
 end
 
-end TMeta.Elab.TypedOpTransform
+end Thyme.Elab.TypedOpTransform

@@ -1,4 +1,4 @@
-# TMeta Rules
+# Thyme Rules
 
 ## Syntax
 

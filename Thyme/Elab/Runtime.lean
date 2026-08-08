@@ -4,7 +4,7 @@ public import Lean.Elab.Term.TermElabM
 
 open Lean Meta
 
-namespace TMeta.Elab
+namespace Thyme.Elab
 
 /--
 Invokes the continuation with fresh free variables with the given names, then
@@ -44,4 +44,4 @@ public def registerQuoteTemplate (template : Expr) : Lean.Elab.Term.TermElabM Ex
   modifyEnv fun env => quoteTemplatesExt.insert env declName (templates.push template)
   return mkApp2 (mkConst ``instantiateQuoteTemplate) (toExpr declName) (toExpr index)
 
-end TMeta.Elab
+end Thyme.Elab

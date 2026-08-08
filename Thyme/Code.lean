@@ -4,7 +4,7 @@ public import Lean.Meta.Basic
 
 open Lean Meta
 
-namespace TMeta
+namespace Thyme
 
 public section
 
@@ -128,4 +128,4 @@ end Code
 
 end
 
-end TMeta
+end Thyme

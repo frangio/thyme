@@ -1,6 +1,6 @@
 module
 
-namespace TMeta.Elab
+namespace Thyme.Elab
 
 public section
 
@@ -44,4 +44,4 @@ theorem hfunext
 
 end
 
-end TMeta.Elab
+end Thyme.Elab

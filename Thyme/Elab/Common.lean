@@ -1,11 +1,11 @@
 module
 
 public import Lean.Meta.Basic
-import TMeta.Code
+import Thyme.Code
 
 open Lean Meta
 
-namespace TMeta.Elab
+namespace Thyme.Elab
 
 public section
 
@@ -50,4 +50,4 @@ def mkEqGen (index : Expr) : Expr :=
 
 end
 
-end TMeta.Elab
+end Thyme.Elab

@@ -1,12 +1,12 @@
 module
 
 public import Lean.Meta.Basic
-import TMeta.Elab.Context
-import TMeta.Code
+import Thyme.Elab.Context
+import Thyme.Code
 
 open Lean Meta Elab
 
-namespace TMeta.Elab
+namespace Thyme.Elab
 
 structure CheckState where
   binders : Array Name
@@ -217,4 +217,4 @@ public def checkStages (e : Expr) (indexFVarId? : Option FVarId := none)
       segmentSizes := rfl
     }
 
-end TMeta.Elab
+end Thyme.Elab

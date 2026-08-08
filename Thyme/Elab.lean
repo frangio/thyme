@@ -2,20 +2,20 @@ module
 
 public meta import Lean.Elab.SyntheticMVars
 public meta import Lean.PrettyPrinter.Delaborator.Builtins
-public meta import TMeta.Elab.Context
-public meta import TMeta.Elab.Common
-public meta import TMeta.Elab.Check
-public meta import TMeta.Elab.Runtime
-public meta import TMeta.Elab.Transform
-public import TMeta.Code
-public import TMeta.Elab.Check
-public import TMeta.Elab.Transform
-public import TMeta.Elab.Runtime
-public import TMeta.Elab.Lemmas
+public meta import Thyme.Elab.Context
+public meta import Thyme.Elab.Common
+public meta import Thyme.Elab.Check
+public meta import Thyme.Elab.Runtime
+public meta import Thyme.Elab.Transform
+public import Thyme.Code
+public import Thyme.Elab.Check
+public import Thyme.Elab.Transform
+public import Thyme.Elab.Runtime
+public import Thyme.Elab.Lemmas
 
 open Lean Meta
 
-namespace TMeta.Elab
+namespace Thyme.Elab
 
 public inductive PendingCodeCheck
     (stage : Int)
@@ -36,13 +36,13 @@ meta section
 open Lean Elab Meta
 open Lean.Elab.Term hiding mkConst
 
-public register_option tmeta.checkCoherence : Bool := {
+public register_option thyme.checkCoherence : Bool := {
   defValue := false
   descr := "check that generated code is definitionally equal to its denotation"
 }
 
 def checkCoherence : Lean.Option Bool where
-  name := `tmeta.checkCoherence
+  name := `thyme.checkCoherence
   defValue := false
 
 def isDen (index : Expr) : MetaM Bool :=
@@ -240,4 +240,4 @@ end
 
 end
 
-end TMeta.Elab
+end Thyme.Elab

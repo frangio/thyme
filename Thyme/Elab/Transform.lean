@@ -1,15 +1,15 @@
 module
 
 public import Lean.Elab.Term.TermElabM
-import TMeta.Elab.Common
-import TMeta.Elab.TypedOpTransform
-import TMeta.Elab.Check
+import Thyme.Elab.Common
+import Thyme.Elab.TypedOpTransform
+import Thyme.Elab.Check
 import Lean.Meta.Eval
-import TMeta.Code
-import TMeta.Elab.Runtime
-import TMeta.Elab.ProveEq
+import Thyme.Code
+import Thyme.Elab.Runtime
+import Thyme.Elab.ProveEq
 
-namespace TMeta.Elab
+namespace Thyme.Elab
 
 open Lean Elab Meta
 open Lean.Elab.Term hiding mkConst
@@ -303,4 +303,4 @@ public def compileQuote (stage : Int) (index hGen quote : Expr) : TermElabM Expr
     let tree ← .transformQuoteTree index hGen sourceDen
     buildQuote tree #[] #[]
 
-end TMeta.Elab
+end Thyme.Elab

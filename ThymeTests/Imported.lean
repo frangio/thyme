@@ -1,8 +1,8 @@
 module
 
-public import TMeta
+public import Thyme
 
-open TMeta
+open Thyme
 
 public section
 

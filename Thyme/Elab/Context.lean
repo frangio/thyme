@@ -1,23 +1,23 @@
 module
 
 public import Lean.Elab.Term.TermElabM
-import TMeta.Elab.Common
-import TMeta.Code
+import Thyme.Elab.Common
+import Thyme.Code
 
-namespace TMeta.Elab
+namespace Thyme.Elab
 
 open Lean Elab Meta Term
 
 def indexName : Name := `i
 
-def addTMetaScope (name : Name) : Name :=
-  addMacroScope `_tmeta name reservedMacroScope
+def addThymeScope (name : Name) : Name :=
+  addMacroScope `_thyme name reservedMacroScope
 
 def implicitIndexName : Name :=
-  addTMetaScope indexName
+  addThymeScope indexName
 
 def contextMarkerName : Name :=
-  addTMetaScope `contextMarker
+  addThymeScope `contextMarker
 
 def throwMalformedContext [Monad m] [MonadError m] : m α :=
   throwError "malformed staging context"
@@ -111,7 +111,7 @@ def resolveInterpretation (autoBind : Bool) : TermElabM Expr := do
     return index
   if autoBind && autoCtx?.isSome then
     unless ← autoImplicit.getM do
-      throwError "TMeta requires auto-bound implicits to elaborate staged code"
+      throwError "Thyme requires auto-bound implicits to elaborate staged code"
     throwAutoBoundImplicitLocal implicitIndexName
   return mkConst ``Interpretation.den
 
@@ -173,4 +173,4 @@ public def getFVarStage (fvarId : FVarId) : MetaM Int := do
   else
     throwError "invalid decl index"
 
-end TMeta.Elab
+end Thyme.Elab

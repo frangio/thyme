@@ -3,13 +3,13 @@ module
 public import Lean.Meta.Basic
 import Lean.Meta.AppBuilder
 import Lean.Meta.WHNF
-import TMeta.Code
-import TMeta.Elab.Common
-import TMeta.Elab.Lemmas
+import Thyme.Code
+import Thyme.Elab.Common
+import Thyme.Elab.Lemmas
 
 open Lean Elab Meta
 
-namespace TMeta.Elab
+namespace Thyme.Elab
 
 public def maybeCast (a : Expr) (eq? : Option Expr) : MetaM Expr :=
   if let some eq := eq? then
@@ -134,4 +134,4 @@ end ProveEq
 
 public def proveEq? := ProveEq.proveEq?
 
-end TMeta.Elab
+end Thyme.Elab

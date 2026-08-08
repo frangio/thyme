@@ -1,15 +1,15 @@
-# TMeta
+# Thyme
 
-TMeta is an experimental Lean library for type-safe staged programming, supporting dependent types and reasoning about metaprograms.
+Thyme is an experimental Lean library for type-safe staged programming, supporting dependent types and reasoning about metaprograms.
 
-In TMeta, a term of type `Code α` is a metaprogram for constructing a Lean expression of type `α`, simultaneously carrying a code generator and a denotation:
+In Thyme, a term of type `Code α` is a metaprogram for constructing a Lean expression of type `α`, simultaneously carrying a code generator and a denotation:
 
 ```lean
 Code.gen : Code α → MetaM Expr
 Code.val : Code α → α
 ```
 
-A metaprogram built with TMeta's staging primitives is *coherent*: the expression produced by its code generator is definitionally equal to its denotation.
+A metaprogram built with Thyme's staging primitives is *coherent*: the expression produced by its code generator is definitionally equal to its denotation.
 
 The staging primitives are quotation and splicing. A quotation `` `⟨e⟩ `` builds a metaprogram of type `Code α` from an expression `e : α`. A splice `~c` allows a metaprogram `c : Code α` to be used as an expression of type `α`.
 
@@ -23,8 +23,8 @@ A splice `~c` is denotationally `c.val`. Operationally, when used at the outermo
 For example, we can implement exponentiation as a staged program that specializes a statically known exponent:
 
 ```lean
-import TMeta
-open TMeta
+import Thyme
+open Thyme
 
 def exp : Nat → Code Nat → Code Nat
   | 0, _ => `⟨1⟩
@@ -68,11 +68,11 @@ theorem exp3.eq_staged : exp3 = exp3.staged :=
   rfl
 ```
 
-The definition `exp3.staged` uses staging syntax, whereas `exp3` uses the staging primitives as functions. Staging syntax invokes TMeta's elaborator, which maintains coherence, evaluates outermost splices, and rejects  cross-stage references. For example, `` `⟨fun x => ~x⟩ `` is rejected because `x` is bound inside a quotation but dereferenced by a splice that escapes it. The denotational definition `exp3` deliberately opts out of this processing, as it is not relevant for reasoning.
+The definition `exp3.staged` uses staging syntax, whereas `exp3` uses the staging primitives as functions. Staging syntax invokes Thyme's elaborator, which maintains coherence, evaluates outermost splices, and rejects  cross-stage references. For example, `` `⟨fun x => ~x⟩ `` is rejected because `x` is bound inside a quotation but dereferenced by a splice that escapes it. The denotational definition `exp3` deliberately opts out of this processing, as it is not relevant for reasoning.
 
 ## Design and implementation
 
-TMeta is based on András Kovács's [*Staged Compilation with Two-Level Type Theory*](https://dl.acm.org/doi/10.1145/3547641), extended to arbitrarily nested stages. Unlike the calculus presented there, TMeta uses Lean's ordinary universes at every stage. Of the two inverse laws, only `` ~`⟨e⟩ = e `` holds definitionally, while `` `⟨~c⟩ = c `` holds propositionally.
+Thyme is based on András Kovács's [*Staged Compilation with Two-Level Type Theory*](https://dl.acm.org/doi/10.1145/3547641), extended to arbitrarily nested stages. Unlike the calculus presented there, Thyme uses Lean's ordinary universes at every stage. Of the two inverse laws, only `` ~`⟨e⟩ = e `` holds definitionally, while `` `⟨~c⟩ = c `` holds propositionally.
 
 The definition of `Code` is basically:
 

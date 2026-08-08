@@ -1,15 +1,15 @@
 module
 
-import TMeta
-public meta import TMetaTests.Imported
+import Thyme
+public meta import ThymeTests.Imported
 public meta import Lean.Elab.Tactic.Guard
 
-open TMeta
+open Thyme
 open Lean Elab Command Term Meta
 open Lean.Parser Lean.Parser.Tactic Lean.Parser.Command
 open Lean.Elab.Tactic.GuardExpr
 
-set_option tmeta.checkCoherence true
+set_option thyme.checkCoherence true
 
 public section
 
