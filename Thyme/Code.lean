@@ -17,8 +17,7 @@ inductive Interp where
 inductive Den : Interp → Prop where
   | intro : Den .den
 
-@[default_instance]
-instance : Den .den := .intro
+attribute [instance, default_instance] Den.intro
 
 namespace Den
 
