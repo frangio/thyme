@@ -273,7 +273,7 @@ def runTransform (x : TransformM α) : TermElabM α := do
 
 unsafe def evalCodegenImpl (codegen : Expr) : MetaM Expr := do
   let codegen ← evalExpr (Codegen .gen)
-    (.app (mkConst ``Codegen) (mkConst ``Interpretation.gen))
+    (.app (mkConst ``Codegen) (mkConst ``Interp.gen))
     codegen
   codegen.run rfl
 
@@ -292,7 +292,7 @@ public def evaluateSplice (stage : Int) (index splice : Expr) : TermElabM Expr :
         let action ← buildSplice tree #[] #[]
         let action ← mkLambdaFVars #[hGen] action
         let codegen := mkApp2 (mkConst ``Codegen.mk) index action
-        let genIndex := mkConst ``Interpretation.gen
+        let genIndex := mkConst ``Interp.gen
         let codegen := codegen.replaceFVars #[index] #[genIndex]
         evalCodegen codegen
 

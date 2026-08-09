@@ -8,13 +8,13 @@ namespace Thyme
 
 public section
 
-inductive Interpretation where
+inductive Interp where
   | den
   | gen
   deriving DecidableEq
 
 @[class]
-inductive Den : Interpretation → Prop where
+inductive Den : Interp → Prop where
   | intro : Den .den
 
 @[default_instance]
@@ -38,7 +38,7 @@ theorem heq_of_gen
 
 end Den
 
-def Codegen (i : Interpretation) := Squash (i = .gen → MetaM Expr)
+def Codegen (i : Interp) := Squash (i = .gen → MetaM Expr)
 
 namespace Codegen
 
@@ -65,11 +65,11 @@ opaque run : Codegen i → i = .gen → MetaM Expr
 
 end Codegen
 
-structure Code (i : Interpretation) (α : [Den i] → Sort u) where
+structure Code (i : Interp) (α : [Den i] → Sort u) where
   den : [Den i] → α
   gen : Codegen i := .stub
 
-unif_hint (i : Interpretation) (h : Den i) (α : Sort u)
+unif_hint (i : Interp) (h : Den i) (α : Sort u)
     (code : Code i (fun [Den i] => α))
     (a den : α) where
   code ≟ .mk (fun [Den i] => den) .stub
@@ -79,11 +79,11 @@ unif_hint (i : Interpretation) (h : Den i) (α : Sort u)
 namespace Code
 
 @[simp↓]
-theorem eq_canonical {i : Interpretation} {α : [Den i] → Sort u}
+theorem eq_canonical {i : Interp} {α : [Den i] → Sort u}
     (den : [Den i] → α) (action : i = .gen → MetaM Expr) :
   mk @den (.mk action) = mk @den .stub := rfl
 
-theorem eq_canonical' {i : Interpretation} {α : [Den i] → Sort u}
+theorem eq_canonical' {i : Interp} {α : [Den i] → Sort u}
     (den : [Den i] → α) (gen : Codegen i) :
     mk @den @gen = mk @den .stub := by
   congr

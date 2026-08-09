@@ -43,10 +43,10 @@ def mkCode (u : Level) (index typeDen den gen : Expr) : Expr :=
 def mkCodeDen (u : Level) (index typeDen code hDen : Expr) : Expr :=
   mkApp4 (.const ``Code.den [u]) index typeDen code hDen
 
-/-- `index = Interpretation.gen` -/
+/-- `index = Interp.gen` -/
 def mkEqGen (index : Expr) : Expr :=
-  mkApp3 (mkConst ``Eq [.one]) (mkConst ``Interpretation) index
-    (mkConst ``Interpretation.gen)
+  mkApp3 (mkConst ``Eq [.one]) (mkConst ``Interp) index
+    (mkConst ``Interp.gen)
 
 end
 

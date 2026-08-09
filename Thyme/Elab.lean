@@ -19,13 +19,13 @@ namespace Thyme.Elab
 
 public inductive PendingCodeCheck
     (stage : Int)
-    (index : Interpretation)
+    (index : Interp)
     (typeDen : [Den index] → Sort u) : Prop where
   | done : PendingCodeCheck stage index typeDen
 
 public abbrev PendingQuoteAction
     (_stage : Int)
-    (index : Interpretation)
+    (index : Interp)
     (typeDen : [Den index] → Sort u)
     (_den : [Den index] → typeDen)
     (_hGen : index = .gen) : Type :=
@@ -46,7 +46,7 @@ def checkCoherence : Lean.Option Bool where
   defValue := false
 
 def isDen (index : Expr) : MetaM Bool :=
-  withNewMCtxDepth <| isDefEq index (mkConst ``Interpretation.den)
+  withNewMCtxDepth <| isDefEq index (mkConst ``Interp.den)
 
 def ensureNoMVars (e : Expr) : TermElabM Unit := do
   if e.hasMVar then
@@ -162,7 +162,7 @@ def elabQuote : TermElab := fun stx expectedType? => do
   let `(`⟨$bodyStx⟩) := stx | throwUnsupportedSyntax
   let expectedType ← expectedType?.getDM mkFreshTypeMVar
   let u ← mkFreshLevelMVar
-  let typeIndex ← mkFreshExprMVar (some (mkConst ``Interpretation))
+  let typeIndex ← mkFreshExprMVar (some (mkConst ``Interp))
   let (ownsContext, index, stage, typeDen, den) ←
     enterDenContext fun contextIndex hDen => do
       discard <| isDefEq typeIndex contextIndex
@@ -201,7 +201,7 @@ def elabSplice : TermElab := fun stx expectedType? => do
     let coeResult ← ensureHasType (some expectedType) result
     if ← checkCoherence.getM then
       let denotation ← splice.replaceFVarsM #[index, hDen]
-        #[mkConst ``Interpretation.den, mkConst ``Den.intro]
+        #[mkConst ``Interp.den, mkConst ``Den.intro]
       withNewMCtxDepth do
         unless ← isDefEq result denotation do
           let note ← mkUnfoldAxiomsNote result denotation

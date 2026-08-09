@@ -32,7 +32,7 @@ public def rawIntLit? : Expr → Option Int
   | _ => none
 
 structure ContextEntry where
-  index : Interpretation
+  index : Interp
   hDen : Den index
 
 def mkEntry (index hDen : Expr) : Expr :=
@@ -106,14 +106,14 @@ def resolveInterpretation (autoBind : Bool) : TermElabM Expr := do
   let index? := index?.orElse fun _ =>
     lctx.findFromUserName? implicitIndexName |>.map (·.toExpr)
   if let some index := index? then
-    unless ← isDefEq (← inferType index) (mkConst ``Interpretation) do
+    unless ← isDefEq (← inferType index) (mkConst ``Interp) do
       throwError "cannot determine an interpretation for staged code"
     return index
   if autoBind && autoCtx?.isSome then
     unless ← autoImplicit.getM do
       throwError "Thyme requires auto-bound implicits to elaborate staged code"
     throwAutoBoundImplicitLocal implicitIndexName
-  return mkConst ``Interpretation.den
+  return mkConst ``Interp.den
 
 /-- Enter a denotational context, returning whether it is newly owned, its
 interpretation and the stage of the operator that entered it. -/
@@ -150,7 +150,7 @@ public def escapeDenContext
   else
     let indexName ← mkFreshUserName indexName
     let hDenName ← mkFreshUserName hDenName
-    withLocalDecl indexName .default (mkConst ``Interpretation)
+    withLocalDecl indexName .default (mkConst ``Interp)
         (kind := .implDetail) fun index =>
       withLocalDecl hDenName .instImplicit (mkDenType index)
           (kind := .implDetail) fun hDen =>
