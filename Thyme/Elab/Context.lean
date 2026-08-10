@@ -8,13 +8,8 @@ namespace Thyme.Elab
 
 open Lean Elab Meta Term
 
-def indexName : Name := `i
-
 def addThymeScope (name : Name) : Name :=
   addMacroScope `_thyme name reservedMacroScope
-
-def implicitIndexName : Name :=
-  addThymeScope indexName
 
 def contextMarkerName : Name :=
   addThymeScope `contextMarker
@@ -32,15 +27,15 @@ public def rawIntLit? : Expr → Option Int
   | _ => none
 
 structure ContextEntry where
-  index : Interp
-  hDen : Den index
+  staged : Staged
+  hDen : staged.interp = .den
 
-def mkEntry (index hDen : Expr) : Expr :=
-  mkApp2 (.const ``ContextEntry.mk []) index hDen
+def mkEntry (staged hDen : Expr) : Expr :=
+  mkApp2 (.const ``ContextEntry.mk []) staged hDen
 
 def viewEntry (entry : Expr) : MetaM (Expr × Expr) := do
-  let_expr ContextEntry.mk index hDen := entry | throwMalformedContext
-  return (index, hDen)
+  let_expr ContextEntry.mk staged hDen := entry | throwMalformedContext
+  return (staged, hDen)
 
 def nilEntry : Expr :=
   .app (.const ``List.nil [.zero]) (.const ``ContextEntry [])
@@ -63,12 +58,12 @@ def listPop? (list : Expr) : MetaM (Option (Expr × Expr)) := do
   | _ => throwMalformedContext
 
 structure ContextZipper where
-  stage : Int
+  level : Int
   entered? : Option ContextEntry
   escaped : List ContextEntry
 
-def mkZipper (stage entered escaped : Expr) : Expr :=
-  mkApp3 (.const ``ContextZipper.mk []) stage entered escaped
+def mkZipper (level entered escaped : Expr) : Expr :=
+  mkApp3 (.const ``ContextZipper.mk []) level entered escaped
 
 def contextMarkerValue? : Option LocalDecl → Option Expr
   | some (.ldecl _ _ _ type value _ _) =>
@@ -80,95 +75,75 @@ def getAmbient : TermElabM (Int × Option Expr × Expr) := do
     return contextMarkerValue? decl?
   let some zipper := marker?
     | return (0, none, nilEntry)
-  let_expr ContextZipper.mk stage entered? escaped := zipper | throwMalformedContext
-  let some stage := rawIntLit? stage | throwMalformedContext
+  let_expr ContextZipper.mk level entered? escaped := zipper | throwMalformedContext
+  let some level := rawIntLit? level | throwMalformedContext
   match_expr entered? with
-  | Option.none _ => return (stage, none, escaped)
-  | Option.some _ entry => return (stage, some entry, escaped)
+  | Option.none _ => return (level, none, escaped)
+  | Option.some _ entry => return (level, some entry, escaped)
   | _ => throwMalformedContext
 
-def withMarker (stage : Int) (entered escaped : Expr) (k : TermElabM α) :
+def withMarker (level : Int) (entered escaped : Expr) (k : TermElabM α) :
     TermElabM α :=
   withLetDecl
     contextMarkerName
     (mkConst ``ContextZipper)
-    (mkZipper (mkRawIntLit stage) entered escaped)
+    (mkZipper (mkRawIntLit level) entered escaped)
     (kind := .implDetail)
     fun _ => k
 
-def resolveInterpretation (autoBind : Bool) : TermElabM Expr := do
-  let autoCtx? := (← read).autoBoundImplicitContext
-  let lctx ← getLCtx
-  let index? ← autoCtx?.bindM fun autoCtx =>
-    autoCtx.boundVariables.findSomeM? fun fvar => do
-      let name ← fvar.fvarId!.getUserName
-      return if name == implicitIndexName then some fvar else none
-  let index? := index?.orElse fun _ =>
-    lctx.findFromUserName? implicitIndexName |>.map (·.toExpr)
-  if let some index := index? then
-    unless ← isDefEq (← inferType index) (mkConst ``Interp) do
-      throwError "cannot determine an interpretation for staged code"
-    return index
-  if autoBind && autoCtx?.isSome then
-    unless ← autoImplicit.getM do
-      throwError "Thyme requires auto-bound implicits to elaborate staged code"
-    throwAutoBoundImplicitLocal implicitIndexName
-  return mkConst ``Interp.den
-
 /-- Enter a denotational context, returning whether it is newly owned, its
-interpretation and the stage of the operator that entered it. -/
+staged instance, and the level of the operator that entered it. -/
 public def enterDenContext
-    (k : (index hDen : Expr) → TermElabM α)
-    (autoBind := false) : TermElabM (Bool × Expr × Int × α) := do
-  let (stage, entered?, escaped) ← getAmbient
+    (k : (staged hDen : Expr) → TermElabM α) :
+    TermElabM (Bool × Expr × Int × α) := do
+  let (level, entered?, escaped) ← getAmbient
   if entered?.isSome then
     throwMultiLevelStagingError
   if let some (entry, escaped) ← listPop? escaped then
-    let (index, hDen) ← viewEntry entry
-    let result ← withMarker (stage + 1) (someEntry entry) escaped <|
-      k index hDen
-    return (false, index, stage, result)
+    let (staged, hDen) ← viewEntry entry
+    let result ← withMarker (level + 1) (someEntry entry) escaped <|
+      k staged hDen
+    return (false, staged, level, result)
   else
-    let index ← resolveInterpretation autoBind
+    let staged ← synthInstance (mkConst ``Staged)
     let hDenName ← mkFreshUserName hDenName
-    withLocalDecl hDenName .instImplicit (mkDenType index) (kind := .implDetail) fun hDen => do
-      let entry := mkEntry index hDen
-      let result ← withMarker (stage + 1) (someEntry entry) escaped <|
-        k index hDen
-      return (true, index, stage, result)
+    withLocalDecl hDenName .default (mkEqDen staged) (kind := .implDetail) fun hDen => do
+      let entry := mkEntry staged hDen
+      let result ← withMarker (level + 1) (someEntry entry) escaped <|
+        k staged hDen
+      return (true, staged, level, result)
 
 /-- Escape the current denotational context, invoking `k` with whether this is
-a root escape and the stage of the splice operator. -/
+a root escape and the level of the splice operator. -/
 public def escapeDenContext
-    (k : (isRoot : Bool) → (stage : Int) → (index hDen : Expr) → TermElabM α) :
+    (k : (isRoot : Bool) → (level : Int) → (staged hDen : Expr) → TermElabM α) :
     TermElabM α := do
-  let (stage, entered?, escaped) ← getAmbient
+  let (level, entered?, escaped) ← getAmbient
   if let some entry := entered? then
-    let (index, hDen) ← viewEntry entry
-    withMarker (stage - 1) noneEntry (mkConsEntry entry escaped) <|
-      k false stage index hDen
+    let (staged, hDen) ← viewEntry entry
+    withMarker (level - 1) noneEntry (mkConsEntry entry escaped) <|
+      k false level staged hDen
   else
-    let indexName ← mkFreshUserName indexName
+    let stagedName ← mkFreshUserName stagedName
     let hDenName ← mkFreshUserName hDenName
-    withLocalDecl indexName .default (mkConst ``Interp)
-        (kind := .implDetail) fun index =>
-      withLocalDecl hDenName .instImplicit (mkDenType index)
+    withLocalDecl stagedName .instImplicit (mkConst ``Staged) fun staged =>
+      withLocalDecl hDenName .default (mkEqDen staged)
           (kind := .implDetail) fun hDen =>
-        let entry := mkEntry index hDen
-        withMarker (stage - 1) noneEntry (mkConsEntry entry escaped) <|
-          k true stage index hDen
+        let entry := mkEntry staged hDen
+        withMarker (level - 1) noneEntry (mkConsEntry entry escaped) <|
+          k true level staged hDen
 
-/-- Returns the stage at which the free variable was introduced. -/
-public def getFVarStage (fvarId : FVarId) : MetaM Int := do
+/-- Returns the staging level at which the free variable was introduced. -/
+public def getFVarLevel (fvarId : FVarId) : MetaM Int := do
   let lctx ← getLCtx
   let decl ← fvarId.getDecl
   if h : decl.index < lctx.decls.size then
     for offset in *...decl.index do
       let i := decl.index - (offset + 1)
       let some value := contextMarkerValue? lctx.decls[i] | continue
-      let_expr ContextZipper.mk stage _ _ := value | throwMalformedContext
-      let some stage := rawIntLit? stage | throwMalformedContext
-      return stage
+      let_expr ContextZipper.mk level _ _ := value | throwMalformedContext
+      let some level := rawIntLit? level | throwMalformedContext
+      return level
     return 0
   else
     throwError "invalid decl index"

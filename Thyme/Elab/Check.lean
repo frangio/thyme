@@ -11,11 +11,11 @@ namespace Thyme.Elab
 structure CheckState where
   binders : Array Name
   segmentStarts : Array Nat
-  segmentStages : Array Int
-  segmentSizes : segmentStarts.size = segmentStages.size
+  segmentLevels : Array Int
+  segmentSizes : segmentStarts.size = segmentLevels.size
 
 structure CheckContext where
-  indexFVarId? : Option FVarId
+  stagedFVarId? : Option FVarId
 
 abbrev CheckM := ReaderT CheckContext (StateT CheckState MetaM)
 
@@ -25,11 +25,11 @@ def pushBinder (name : Name) : CheckM PUnit :=
 def popBinder : CheckM PUnit :=
   modify fun s => { s with binders := s.binders.pop }
 
-def pushSegment (stage : Int) : CheckM PUnit :=
+def pushSegment (level : Int) : CheckM PUnit :=
   modify fun s => {
     s with
     segmentStarts := s.segmentStarts.push s.binders.size
-    segmentStages := s.segmentStages.push stage
+    segmentLevels := s.segmentLevels.push level
     segmentSizes := by simp [s.segmentSizes]
   }
 
@@ -37,12 +37,12 @@ def popSegment : CheckM PUnit :=
   modify fun s => {
     s with
     segmentStarts := s.segmentStarts.pop
-    segmentStages := s.segmentStages.pop
+    segmentLevels := s.segmentLevels.pop
     segmentSizes := by simp [s.segmentSizes]
   }
 
-def currentStage : CheckM Int :=
-  return (← get).segmentStages.back!
+def currentLevel : CheckM Int :=
+  return (← get).segmentLevels.back!
 
 def binderIndex (deBruijnIndex : Nat) : CheckM Nat := do
   let numBinders := (← get).binders.size
@@ -54,13 +54,13 @@ def binderName (deBruijnIndex : Nat) : CheckM Name := do
   let index ← binderIndex deBruijnIndex
   return (← get).binders[index]!
 
-def binderStage (deBruijnIndex : Nat) : CheckM Int := do
+def binderLevel (deBruijnIndex : Nat) : CheckM Int := do
   let index ← binderIndex deBruijnIndex
-  let { segmentStarts, segmentStages, segmentSizes, .. } ← get
+  let { segmentStarts, segmentLevels, segmentSizes, .. } ← get
   for h : offset in *...segmentStarts.size do
     let i := segmentStarts.size - (offset + 1)
     if segmentStarts[i] ≤ index then
-      return segmentStages[i]
+      return segmentLevels[i]
   unreachable!
 
 inductive AppState
@@ -108,7 +108,7 @@ def opName : AppState → Name
   | .regular => unreachable!
   | .code0 | .code1 | .code2 => ``Code
   | .mk0 | .mk1 | .mk2 | .mk3 | .mk4 => ``Code.mk
-  | .den0 | .den1 | .den2 | .den3 | .den4 => ``Code.den
+  | .den0 | .den1 | .den2 | .den3 | .den4 => ``Code.den'
 
 end AppState
 
@@ -118,7 +118,7 @@ def reportStagingError (name : MessageData) : CheckM α :=
 mutual
 
 partial def checkStage (e : Expr) : CheckM Unit := do
-  let { indexFVarId? } ← read
+  let { stagedFVarId? } ← read
   match e with
   | .app .. =>
       let state ← checkApp e
@@ -136,16 +136,16 @@ partial def checkStage (e : Expr) : CheckM Unit := do
       checkStage body
       popBinder
   | .bvar deBruijnIndex =>
-      let binderStage ← binderStage deBruijnIndex
-      let stage ← currentStage
-      unless binderStage = stage do
+      let binderLevel ← binderLevel deBruijnIndex
+      let level ← currentLevel
+      unless binderLevel = level do
         let name ← binderName deBruijnIndex
         reportStagingError m!"{name}"
   | .fvar fvarId =>
-    unless indexFVarId? == some fvarId do
-      let fvarStage ← getFVarStage fvarId
-      let stage ← currentStage
-      unless stage = fvarStage do
+    unless stagedFVarId? == some fvarId do
+      let fvarLevel ← getFVarLevel fvarId
+      let level ← currentLevel
+      unless level = fvarLevel do
         reportStagingError m!"{mkFVar fvarId}"
   | .mvar mvarId =>
       throwError m!"staged term contains unresolved metavariable {mkMVar mvarId}"
@@ -155,13 +155,17 @@ partial def checkStage (e : Expr) : CheckM Unit := do
       return
 
 /-- Check the body of a denotational function without checking its
-implementation-detail `Den` domain. -/
+implementation-detail equality domain. -/
 partial def checkDen (e : Expr) : CheckM Unit := do
   match e.consumeMData with
   | .lam name domain body _ =>
-      let_expr Den index := domain
+      let_expr Eq type interp den := domain
         | throwError "malformed denotational function"
-      withReader ({ · with indexFVarId? := index.fvarId? }) do
+      unless type.isConstOf ``Interp && den.isConstOf ``Interp.den do
+        throwError "malformed denotational function"
+      let_expr Staged.interp staged := interp
+        | throwError "malformed denotational function"
+      withReader ({ · with stagedFVarId? := staged.fvarId? }) do
         pushBinder name
         checkStage body
         popBinder
@@ -169,7 +173,7 @@ partial def checkDen (e : Expr) : CheckM Unit := do
       checkStage e
 
 partial def checkApp (e : Expr) : CheckM AppState := do
-  let stage ← currentStage
+  let level ← currentLevel
   match e with
   | .app fn arg =>
       let state ← checkApp fn
@@ -177,13 +181,13 @@ partial def checkApp (e : Expr) : CheckM AppState := do
       | .regular | .den4 =>
           checkStage arg
       | .code1 | .mk1 | .mk2 =>
-          pushSegment (stage + 1)
+          pushSegment (level + 1)
           checkDen arg
           popSegment
       | .den1 =>
           checkDen arg
       | .den2 =>
-          pushSegment (stage - 1)
+          pushSegment (level - 1)
           checkStage arg
           popSegment
       | .code0 | .mk0 | .mk3 | .den0 | .den3 =>
@@ -198,7 +202,7 @@ partial def checkApp (e : Expr) : CheckM AppState := do
         return .code0
       else if name == ``Code.mk then
         return .mk0
-      else if name == ``Code.den then
+      else if name == ``Code.den' then
         return .den0
       else
         checkStage fn
@@ -206,14 +210,14 @@ partial def checkApp (e : Expr) : CheckM AppState := do
 
 end
 
-public def checkStages (e : Expr) (indexFVarId? : Option FVarId := none)
-    (startStage : Int := 0) : MetaM Unit :=
+public def checkStages (e : Expr) (stagedFVarId? : Option FVarId := none)
+    (startLevel : Int := 0) : MetaM Unit :=
   (checkStage e)
-    |>.run { indexFVarId? }
+    |>.run { stagedFVarId? }
     |>.run' {
       binders := #[]
       segmentStarts := #[0]
-      segmentStages := #[startStage]
+      segmentLevels := #[startLevel]
       segmentSizes := rfl
     }
 

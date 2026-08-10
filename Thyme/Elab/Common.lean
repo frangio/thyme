@@ -11,17 +11,27 @@ public section
 
 def hDenName : Name := `hDen
 def hGenName : Name := `hGen
+def stagedName : Name := `s
 
 def throwMultiLevelStagingError [Monad m] [MonadError m] : m α :=
   throwError "staging error: multi-level staging is not supported"
 
-/-- `Den index` -/
-def mkDenType (index : Expr) : Expr :=
-  .app (mkConst ``Den) index
+/-- `staged.interp` -/
+def mkStagedInterp (staged : Expr) : Expr :=
+  .app (mkConst ``Staged.interp) staged
 
-/-- `Den.elimType index hGen` -/
-def mkDenElimType (u : Level) (index hGen : Expr) : Expr :=
-  mkApp2 (.const ``Den.elimType [u]) index hGen
+/-- `Staged.mk interp` -/
+def mkStaged (interp : Expr) : Expr :=
+  .app (mkConst ``Staged.mk) interp
+
+/-- `staged.interp = Interp.den` -/
+def mkEqDen (staged : Expr) : Expr :=
+  mkApp3 (mkConst ``Eq [.one]) (mkConst ``Interp) (mkStagedInterp staged)
+    (mkConst ``Interp.den)
+
+/-- `fun _ : staged.interp = Interp.den => PUnit.{u}` -/
+def mkErasedTypeDen (u : Level) (staged : Expr) : Expr :=
+  .lam hDenName (mkEqDen staged) (.const ``PUnit [u]) .default
 
 /-- `typeDen hDen`, exposing a reducible family and its head beta redex. -/
 def instantiateTypeDen (typeDen hDen : Expr) : MetaM Expr := do
@@ -31,21 +41,21 @@ def instantiateTypeDen (typeDen hDen : Expr) : MetaM Expr := do
   | typeDen =>
     return .app typeDen hDen
 
-/-- `Code.{u} index typeDen` -/
-def mkCodeType (u : Level) (index typeDen : Expr) : Expr :=
-  mkApp2 (.const ``Code [u]) index typeDen
+/-- `Code.{u} staged typeDen` -/
+def mkCodeType (u : Level) (staged typeDen : Expr) : Expr :=
+  mkApp2 (.const ``Code [u]) staged typeDen
 
-/-- `Code.mk index typeDen den gen` -/
-def mkCode (u : Level) (index typeDen den gen : Expr) : Expr :=
-  mkApp4 (.const ``Code.mk [u]) index typeDen den gen
+/-- `Code.mk staged typeDen den gen` -/
+def mkCode (u : Level) (staged typeDen den gen : Expr) : Expr :=
+  mkApp4 (.const ``Code.mk [u]) staged typeDen den gen
 
-/-- `Code.den index typeDen code hDen` -/
-def mkCodeDen (u : Level) (index typeDen code hDen : Expr) : Expr :=
-  mkApp4 (.const ``Code.den [u]) index typeDen code hDen
+/-- `Code.den' staged typeDen code hDen` -/
+def mkCodeDen (u : Level) (staged typeDen code hDen : Expr) : Expr :=
+  mkApp4 (.const ``Code.den' [u]) staged typeDen code hDen
 
-/-- `index = Interp.gen` -/
-def mkEqGen (index : Expr) : Expr :=
-  mkApp3 (mkConst ``Eq [.one]) (mkConst ``Interp) index
+/-- `staged.interp = Interp.gen` -/
+def mkEqGen (staged : Expr) : Expr :=
+  mkApp3 (mkConst ``Eq [.one]) (mkConst ``Interp) (mkStagedInterp staged)
     (mkConst ``Interp.gen)
 
 end

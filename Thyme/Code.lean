@@ -13,33 +13,11 @@ inductive Interp where
   | gen
   deriving DecidableEq
 
-@[class]
-inductive Den : Interp → Prop where
-  | intro : Den .den
-
-attribute [instance, default_instance] Den.intro
-
-namespace Den
-
-def elim : (α : [Den i] → Sort u) → i = .gen → [Den i] → α := nofun
-
-def elimType : i = .gen → [Den i] → Sort u := elim _
-
-theorem heq_of_gen
-    {α β : [Den i] → Sort u}
-    (hGen : i = .gen)
-    (a : [Den i] → α) (b : [Den i] → β) : @a ≍ @b := by
-  subst i
-  have : @α = @β := funext nofun
-  subst β
-  apply heq_of_eq
-  exact funext nofun
-
-end Den
-
 def Codegen (i : Interp) := Squash (i = .gen → MetaM Expr)
 
 namespace Codegen
+
+variable {i : Interp}
 
 instance : Subsingleton (Codegen i) :=
   inferInstanceAs (Subsingleton (Squash _))
@@ -62,58 +40,107 @@ private unsafe def runImpl : Codegen i → i = .gen → MetaM Expr :=
 @[implemented_by runImpl]
 opaque run : Codegen i → i = .gen → MetaM Expr
 
+@[simp↓]
+theorem mk_eq_stub (action : i = .gen → MetaM Expr) :
+    mk action = stub :=
+  rfl
+
+theorem eq_stub (gen : Codegen i) : gen = stub := by
+  apply Subsingleton.elim
+
 end Codegen
 
-structure Code (i : Interp) (α : [Den i] → Sort u) where
-  den : [Den i] → α
-  gen : Codegen i := .stub
+class Staged where
+  interp : Interp
 
-unif_hint (i : Interp) (h : Den i) (α : Sort u)
-    (code : Code i (fun [Den i] => α))
+instance (priority := low) Staged.den : Staged := ⟨.den⟩
+
+attribute [-instance] Staged.den
+
+structure Code [s : Staged] (α : s.interp = .den → Sort u) where
+  den' : (h : s.interp = .den) → α h
+  gen : Codegen s.interp := .stub
+
+unif_hint [s : Staged] (h : s.interp = .den) (α : Sort u)
+    (code : Code (fun _ => α))
     (a den : α) where
-  code ≟ .mk (fun [Den i] => den) .stub
+  code ≟ .mk (fun _ => den) .stub
   den ≟ a
-  ⊢ @code.den h ≟ a
+  ⊢ code.den' h ≟ a
 
 namespace Code
 
-@[simp↓]
-theorem eq_canonical {i : Interp} {α : [Den i] → Sort u}
-    (den : [Den i] → α) (action : i = .gen → MetaM Expr) :
-  mk @den (.mk action) = mk @den .stub := rfl
-
-theorem eq_canonical' {i : Interp} {α : [Den i] → Sort u}
-    (den : [Den i] → α) (gen : Codegen i) :
-    mk @den @gen = mk @den .stub := by
-  congr
-  apply Subsingleton.elim
+def ofGen [s : Staged] (α : s.interp = .den → Sort u)
+    (gen : Codegen s.interp)
+    (hGen : s.interp = .gen) : Code α :=
+  { gen, den' hDen := nomatch hDen ▸ hGen }
 
 @[ext]
-theorem ext {a b : Code i @α} (h : @a.den = @b.den) : a = b := by
+theorem ext' [s : Staged] {α : s.interp = .den → Sort u} {a b : Code α} :
+    a.den' = b.den' → a = b := by
+  intro h
   cases a
   cases b
   congr
   apply Subsingleton.elim
 
 @[ext]
-theorem funext
-    {α : [Den i] → Sort u} {β : Code i @α → Sort v}
-    {f g : (a : Code i @α) → β a}
-    (h : ∀ (a : [Den i] → α), f { den := @a } = g { den := @a }) :
-    f = g := by
-  funext ⟨a, _⟩
-  rw [eq_canonical', h a]
+theorem funext' [s : Staged]
+    {α : s.interp = .den → Sort u} {β : Code α → Sort v}
+    {f g : (a : Code α) → β a} :
+    (∀ a, f ⟨a, .stub⟩ = g ⟨a, .stub⟩) → f = g := by
+  intro h
+  funext ⟨a, gen⟩
+  rw [Codegen.eq_stub gen, h a]
 
-theorem heq_of_gen
-    {α₁ α₂ : [Den i] → Sort u}
-    (hGen : i = .gen)
-    (a₁ : Code i @α₁) (a₂ : Code i @α₂) : a₁ ≍ a₂ := by
-  have : @α₁ = @α₂ := eq_of_heq (Den.heq_of_gen hGen @α₁ @α₂)
+section
+
+attribute [local instance] Staged.den
+
+abbrev den (self : Code α) : α rfl := self.den' rfl
+
+@[ext default + 1]
+theorem ext {a b : Code α} : a.den = b.den → a = b := by
+  intro h
+  ext
+  exact h
+
+@[ext default + 1]
+theorem funext
+    {α : Sort u}
+    {β : Code (fun _ => α) → Sort v}
+    {f g : (a : Code (fun _ => α)) → β a} :
+    (∀ (a : α), f ⟨fun _ => a, .stub⟩ = g ⟨fun _ => a, .stub⟩) → f = g := by
+  intro h
+  funext ⟨a, gen⟩
+  rw [Codegen.eq_stub gen, h (a rfl)]
+
+end
+
+theorem den_heq_of_gen [s : Staged]
+    {α β : s.interp = .den → Sort u}
+    (hGen : s.interp = .gen)
+    (a : (hDen : s.interp = .den) → α hDen)
+    (b : (hDen : s.interp = .den) → β hDen) : a ≍ b := by
+  cases s
+  have : α = β := by
+    funext hDen
+    nomatch hGen, hDen
+  subst β
+  apply heq_of_eq
+  funext hDen
+  nomatch hGen, hDen
+
+theorem heq_of_gen [s : Staged]
+    {α₁ α₂ : s.interp = .den → Sort u}
+    (h : s.interp = .gen)
+    (a₁ : Code α₁) (a₂ : Code α₂) : a₁ ≍ a₂ := by
+  have : α₁ = α₂ := eq_of_heq (den_heq_of_gen h α₁ α₂)
   subst α₂
   apply heq_of_eq
   ext1
   apply eq_of_heq
-  apply Den.heq_of_gen hGen
+  apply den_heq_of_gen h
 
 end Code
 

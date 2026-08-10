@@ -36,7 +36,7 @@ namespace ProveEq
 
 mutual
 
-variable (index hGen : Expr)
+variable (staged hGen : Expr)
 
 /-- Returns a proof that a source expression equals its generative staging
 translation. -/
@@ -82,10 +82,10 @@ partial def proveHEq? (source target : Expr) : MetaM (Option Expr) := do
   | mkApp2 (.const ``Code _) _ _, mkApp2 (.const ``Code _) _ _ =>
     return ← mkAppM ``Code.heq_of_gen #[hGen, source, target]
   | .forallE _ sourceDomain _ _, .forallE _ targetDomain _ _ =>
-    let denType := mkDenType index
-    if ← isDefEq sourceDomain denType then
-      if ← isDefEq targetDomain denType then
-        return ← mkAppM ``Den.heq_of_gen #[hGen, source, target]
+    let eqDenType := mkEqDen staged
+    if ← isDefEq sourceDomain eqDenType then
+      if ← isDefEq targetDomain eqDenType then
+        return ← mkAppM ``Code.den_heq_of_gen #[hGen, source, target]
   | _, _ => pure ()
   match source, target with
   | source@(.forallE ..), target@(.forallE ..) => do

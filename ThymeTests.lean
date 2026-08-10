@@ -29,27 +29,28 @@ elab "#guard_staged " r:term:51 eq:equal p:term : command =>
 
 end
 
-def idc (α : Code Type) (a : Code ~α) : Code ~α := a
+def idc [Staged] (α : Code Type) (a : Code ~α) : Code ~α := a
 
 #guard_staged idc `⟨Bool⟩ `⟨true⟩ =~ `⟨true⟩
 
-example {α : Code Type} (f : Code ~α → Code Unit) : Code (~α → Unit) :=
+example [Staged] {α : Code Type} (f : Code ~α → Code Unit) : Code (~α → Unit) :=
   `⟨id (fun x => ~(f `⟨x⟩))⟩
 
 example : (α : Type) → (x : α) → (P : α → Type) → P x → P x :=
   fun (α : Type) (x : α) (P : α → Type) (y : P x) =>
     ~(`⟨y⟩ : Code (P x))
 
-example : Code ((α : Type) → α → α) :=
+example [Staged] : Code ((α : Type) → α → α) :=
   `⟨fun α x => ~(`⟨x⟩ : Code α)⟩
 
-def map (α β : Code Type) (f : Code ~α → Code ~β) (as : Code (List ~α)) : Code (List ~β) :=
+def map [Staged] (α β : Code Type) (f : Code ~α → Code ~β)
+    (as : Code (List ~α)) : Code (List ~β) :=
   `⟨(~as).foldr (fun a bs => ~(f `⟨a⟩) :: bs) []⟩
 
 #guard_staged fun (ns : List Nat) => ~(map `⟨Nat⟩ `⟨Nat⟩ (fun n => `⟨~n + 10⟩) `⟨ns⟩) =ₛ
   fun (ns : List Nat) => ns.foldr (fun (a : Nat) (bs : List Nat) => (a + 10) :: bs) []
 
-def exp (n : Nat) (x : Code Nat) : Code Nat :=
+def exp [Staged] (n : Nat) (x : Code Nat) : Code Nat :=
   n.repeat (fun y => `⟨~y * ~x⟩) `⟨1⟩
 
 #guard_staged ~(exp 3 `⟨4⟩) =ₛ 1 * 4 * 4 * 4
@@ -62,12 +63,13 @@ theorem exp_eq_pow (n : Nat) (x : Nat) : (exp n `⟨x⟩).den = x ^ n := by
   | zero => rfl
   | succ n ih => simp [Nat.repeat, Nat.pow_succ, ih]
 
-def Vec (n : Nat) (α : Code Type) :=
+def Vec [Staged] (n : Nat) (α : Code Type) :=
   n.repeat (fun β => `⟨~α × ~β⟩) `⟨Unit⟩
 
 #guard_staged ~(Vec 3 `⟨Char⟩) =ₛ Char × Char × Char × Unit
 
-def Vec.map {α β : Code Type} (n : Nat) (f : Code ~α → Code ~β) (as : Code ~(Vec n α)) : Code ~(Vec n β) :=
+def Vec.map [Staged] {α β : Code Type} (n : Nat) (f : Code ~α → Code ~β)
+    (as : Code ~(Vec n α)) : Code ~(Vec n β) :=
   match n with
   | 0 => `⟨()⟩
   | n + 1 => `⟨(~(f `⟨(~as).1⟩), ~(map n f `⟨(~as).2⟩))⟩
@@ -78,6 +80,7 @@ def Vec.map {α β : Code Type} (n : Nat) (f : Code ~α → Code ~β) (as : Code
 
 section
 
+variable [Staged]
 variable {α : Code Type} {β : Code (~α → Type)}
 
 def lift (f : Code ((x : ~α) → ~β x)) :
@@ -100,12 +103,12 @@ theorem lift_unlift (f : (x : Code ~α) → Code (~β ~x)) :
 
 end
 
-def sharePair (x : Code Nat) : Code (Nat × Nat) :=
+def sharePair [Staged] (x : Code Nat) : Code (Nat × Nat) :=
   `⟨let y := ~x; (y, y)⟩
 
 #guard_staged fun x => ~(sharePair `⟨x + x⟩) =ₛ fun x => let y := x + x; (y, y)
 
-def letCode (value : Code Nat) (body : Code Nat → Code Nat) : Code Nat :=
+def letCode [Staged] (value : Code Nat) (body : Code Nat → Code Nat) : Code Nat :=
   `⟨let x := ~value; ~(body `⟨x⟩)⟩
 
 #guard_staged
@@ -116,13 +119,14 @@ def letCode (value : Code Nat) (body : Code Nat → Code Nat) : Code Nat :=
   let y := 2
   x + y
 
-def captures (f : Nat → Code Nat → Code Nat → Code Nat) : Code Nat :=
+def captures [Staged] (f : Nat → Code Nat → Code Nat → Code Nat) : Code Nat :=
   `⟨let x := 0; ~(let y := 1; `⟨let z := 2; ~(f y `⟨x⟩ `⟨z⟩)⟩)⟩
 
 #guard_staged ~(captures (fun y => cond (y == 1))) =ₛ let  x := 0; let _z := 2; x
 #guard_staged ~(captures (fun y => cond (y != 1))) =ₛ let _x := 0; let  z := 2; z
 
-def dependentArg (x : Code Nat) (h : Code (~x = 0)) : Code { n : Nat // n = 0 } :=
+def dependentArg [Staged] (x : Code Nat) (h : Code (~x = 0)) :
+    Code { n : Nat // n = 0 } :=
   `⟨⟨~x, ~h⟩⟩
 
 #guard_staged `⟨~(dependentArg `⟨0⟩ `⟨rfl⟩)⟩ =~ `⟨⟨0, rfl⟩⟩
@@ -133,22 +137,22 @@ def dependentArg (x : Code Nat) (h : Code (~x = 0)) : Code { n : Nat // n = 0 } 
 
 /-- error: staging error: variable `x` is not available in the current staging context -/
 #guard_msgs in
-def illStagedFVar (x : Nat) : Code Nat :=
+def illStagedFVar [Staged] (x : Nat) : Code Nat :=
   `⟨x⟩
 
-def nestedSpliceNatF (_ : Nat) : Code Nat := `⟨1⟩
+def nestedSpliceNatF [Staged] (_ : Nat) : Code Nat := `⟨1⟩
 
-def nestedSpliceNatG (_ : Nat) : Code Nat := `⟨2⟩
+def nestedSpliceNatG [Staged] (_ : Nat) : Code Nat := `⟨2⟩
 
 #guard_staged ~(nestedSpliceNatF ~(nestedSpliceNatG 123)) =ₛ 1
 
-def nestedSpliceFunF (_ : Nat → Nat) : Code Nat := `⟨1⟩
+def nestedSpliceFunF [Staged] (_ : Nat → Nat) : Code Nat := `⟨1⟩
 
-def nestedSpliceCodeG (_ : Code Nat) : Code Nat := `⟨2⟩
+def nestedSpliceCodeG [Staged] (_ : Code Nat) : Code Nat := `⟨2⟩
 
 #guard_staged ~(nestedSpliceFunF fun x => ~(nestedSpliceCodeG `⟨x⟩)) =ₛ 1
 
-def nestedSpliceCodeG₂ (_ _ : Code Nat) : Code Nat := `⟨2⟩
+def nestedSpliceCodeG₂ [Staged] (_ _ : Code Nat) : Code Nat := `⟨2⟩
 
 /-- error: staging error: variable `y` is not available in the current staging context -/
 #guard_msgs in
@@ -157,20 +161,20 @@ def illStagedNestedSplice (y : Nat) : Nat :=
 
 /-- error: staging error: multi-level staging is not supported -/
 #guard_msgs in
-def unsupportedNestedCode (_ : Code (Code Nat)) : Unit := ()
+def unsupportedNestedCode [Staged] (_ : Code (Code Nat)) : Unit := ()
 
 /-- error: staging error: multi-level staging is not supported -/
 #guard_msgs in
-def unsupportedNestedQuote := `⟨`⟨1⟩⟩
+def unsupportedNestedQuote [Staged] := `⟨`⟨1⟩⟩
 
-def stagedId (α : Code (Sort u)) : Code (~α → ~α) :=
+def stagedId [Staged] (α : Code (Sort u)) : Code (~α → ~α) :=
   `⟨fun x => x⟩
 
 #guard_staged ~(`⟨Nat⟩ : Code Type) =ₛ Nat
 
 #guard_staged ~(`⟨Type⟩ : Code (Type 1)) =ₛ Type
 
-def finType (n : Code Nat) : Code Type :=
+def finType [Staged] (n : Code Nat) : Code Type :=
   `⟨Fin ~n⟩
 
 #guard_staged (fun n : Nat => ~(finType `⟨n⟩)) =ₛ fun n : Nat => Fin n
@@ -189,8 +193,8 @@ Note: The following definitions were not unfolded because their definition is no
 #check ~(opaqueImportedSucc `⟨41⟩)
 
 /-- Deliberately bypasses staging syntax to exercise the trusted generator boundary. -/
-def incoherent : Code Nat :=
-  Code.mk 0 (.mk fun _ => pure (mkNatLit 1))
+def incoherent [Staged] : Code Nat :=
+  Code.mk (fun _ => 0) (.mk fun _ => pure (mkNatLit 1))
 
 example : incoherent.den = 0 := rfl
 
