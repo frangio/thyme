@@ -148,7 +148,9 @@ partial def checkStage (e : Expr) : CheckM Unit := do
       unless level = fvarLevel do
         reportStagingError m!"{mkFVar fvarId}"
   | .mvar mvarId =>
-      throwError m!"staged term contains unresolved metavariable {mkMVar mvarId}"
+      let some value ← getExprMVarAssignment? mvarId
+        | throwError m!"staged term contains unresolved metavariable {mkMVar mvarId}"
+      mvarId.withContext <| checkStage value
   | .mdata _ body | .proj _ _ body =>
       checkStage body
   | .sort .. | .const .. | .lit .. =>
