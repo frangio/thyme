@@ -91,6 +91,12 @@ def unlift (f : (x : Code ~α) → Code (~β ~x)) :
     Code ((x : ~α) → ~β x) :=
   `⟨fun x => ~(f `⟨x⟩)⟩
 
+end
+
+section
+
+variable {α : Code Type} {β : Code (~α → Type)}
+
 theorem unlift_lift (f : Code ((x : ~α) → ~β x)) :
     unlift (lift f) = f := by
   ext
@@ -205,3 +211,45 @@ denotation:
   incoherent.den -/
 #guard_msgs in
 #check ~incoherent
+
+/-- warning: declaration may produce an incoherent generator: its elaborated term transports a `Code` value across an equality; ensure that rewrites occur inside quotations
+
+Note: This linter can be disabled with `set_option linter.thyme.codeTransport false` -/
+#guard_msgs in
+def zero_mul_bad [Staged] (x y : Code Nat) (h : Code (~x = 0 * ~y)) :
+    Code (~x = 0) := by
+  simpa using h
+
+def zero_mul_good [Staged] (x y : Code Nat) (h : Code (~x = 0 * ~y)) :
+    Code (~x = 0) :=
+  `⟨by simpa using ~h⟩
+
+theorem useZeroMul (x y : Nat) (h : x = 0 * y) : x = 0 :=
+  ~(zero_mul_good `⟨x⟩ `⟨y⟩ `⟨h⟩)
+
+/-- warning: declaration may produce an incoherent generator: its elaborated term transports a `Code` value across an equality; ensure that rewrites occur inside quotations
+
+Note: This linter can be disabled with `set_option linter.thyme.codeTransport false` -/
+#guard_msgs in
+def substCode [Staged] (n m : Code Nat) (h : n = m)
+    (x : Code (Fin ~n)) : Code (Fin ~m) := by
+  subst m
+  exact x
+
+def CodeAlias [Staged] (n : Code Nat) := Code (Fin ~n)
+
+/-- warning: declaration may produce an incoherent generator: its elaborated term transports a `Code` value across an equality; ensure that rewrites occur inside quotations
+
+Note: This linter can be disabled with `set_option linter.thyme.codeTransport false` -/
+#guard_msgs in
+def transportCodeAlias [Staged] {n m : Code Nat} (h : n = m)
+    (x : CodeAlias n) : CodeAlias m :=
+  h ▸ x
+
+/-- warning: declaration may produce an incoherent generator: its elaborated term transports a `Code` value across an equality; ensure that rewrites occur inside quotations
+
+Note: This linter can be disabled with `set_option linter.thyme.codeTransport false` -/
+#guard_msgs in
+def transportInsideQuote [Staged] {α β : Code Type} (h : α = β)
+    (x : Code ~α) : Code ~β :=
+  `⟨~(h ▸ x)⟩

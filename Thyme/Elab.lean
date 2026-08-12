@@ -7,6 +7,7 @@ public meta import Thyme.Elab.Common
 public meta import Thyme.Elab.Check
 public meta import Thyme.Elab.Runtime
 public meta import Thyme.Elab.Transform
+public import Thyme.Elab.Linter
 public import Thyme.Code
 public import Thyme.Elab.Check
 public import Thyme.Elab.Transform
