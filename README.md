@@ -1,85 +1,82 @@
 # Thyme
 
-Thyme is an experimental Lean library for type-safe staged programming, supporting dependent types and reasoning about metaprograms.
+Thyme is a Lean library for typed metaprogramming based on staging, with support for dependent types and reasoning about metaprograms.
 
-In Thyme, a term of type `Code α` is a metaprogram for constructing a Lean expression of type `α`, simultaneously carrying a code generator and a denotation:
+## Examples
 
-```lean
-Code.gen : Code α → MetaM Expr
-Code.val : Code α → α
-```
-
-A metaprogram built with Thyme's staging primitives is *coherent*: the expression produced by its code generator is definitionally equal to its denotation.
-
-The staging primitives are quotation and splicing. A quotation `` `⟨e⟩ `` builds a metaprogram of type `Code α` from an expression `e : α`. A splice `~c` allows a metaprogram `c : Code α` to be used as an expression of type `α`.
-
-```lean
-e : α       ⊢ `⟨e⟩ : Code α
-c : Code α  ⊢  ~c  : α
-```
-
-A splice `~c` is denotationally `c.val`. Operationally, when used at the outermost stage, `c`'s generator is evaluated during elaboration and its result replaces the splice. Inside a quotation, `c`'s generator is instead incorporated into that quotation's generator.
-
-For example, we can implement exponentiation as a staged program that specializes a statically known exponent:
+We can implement exponentiation as a staged function of a statically known exponent:
 
 ```lean
 import Thyme
 open Thyme
 
-def exp : Nat → Code Nat → Code Nat
-  | 0, _ => `⟨1⟩
-  | n + 1, x => `⟨~(exp n x) * ~x⟩
+def exp [Staged] (x : Code Nat) : Nat → Code Nat
+  | 0 => `⟨1⟩
+  | n + 1 => `⟨~(exp x n) * ~x⟩
 ```
 
-Then `` ~(exp 3 `⟨2⟩) `` elaborates to `1 * 2 * 2 * 2`.
+Then `` ~(exp `⟨2⟩ 3) `` elaborates to `1 * 2 * 2 * 2`.
 
-More interestingly, the base need not be a closed expression, so we can define:
+More interestingly, the code for `x` can refer to bound variables in context:
 
 ```lean
 def exp3 (x : Nat) : Nat :=
-  ~(exp 3 `⟨x⟩)
+  ~(exp `⟨x⟩ 3)
 ```
 
-The body of `exp3` elaborates to `1 * x * x * x`.
+The body of `exp3` is then `1 * x * x * x`.
 
-We can reason about `exp` in terms of its denotation:
+We can reason about the denotation of metaprograms through `Code.den`:
 
 ```lean
-theorem exp_eq_pow (n : Nat) (x : Code Nat) :
-    (exp n x).val = x.val ^ n := by
+theorem exp_eq_pow : (exp x n).den = x.den ^ n := by
   induction n with
   | zero => rfl
-  | succ n ih => simp [Nat.pow_succ, exp, ih]
+  | succ n ih => simp [ih, exp, Nat.pow_succ]
 ```
 
-By coherence, theorems about the denotation of metaprograms produced by `exp` transfer to their generated code.
-
-Alternatively, we can retain the denotation of the staged term as the definition that is convenient to reason about, and prove coherence as a `@[csimp]` theorem to direct the compiler to use the more efficient generated code:
+Coherent metaprograms generate code that is definitionally equal to their denotation, and properties carry over:
 
 ```lean
-def exp3 (x : Nat) : Nat :=
-  (exp 3 (.quote x)).val
-
-def exp3.staged (x : Nat) : Nat :=
-  ~(exp 3 `⟨x⟩)
-
-@[csimp]
-theorem exp3.eq_staged : exp3 = exp3.staged :=
+theorem exp3_coherent : exp3 x = (exp `⟨x⟩ 3).den :=
   rfl
+
+theorem exp3_eq_pow3 : exp3 x = x ^ 3 :=
+  exp_eq_pow ▸ exp3_coherent
 ```
 
-The definition `exp3.staged` uses staging syntax, whereas `exp3` uses the staging primitives as functions. Staging syntax invokes Thyme's elaborator, which maintains coherence, evaluates outermost splices, and rejects  cross-stage references. For example, `` `⟨fun x => ~x⟩ `` is rejected because `x` is bound inside a quotation but dereferenced by a splice that escapes it. The denotational definition `exp3` deliberately opts out of this processing, as it is not relevant for reasoning.
+Thyme's staging syntax constructs coherent metaprograms, but an arbitrary `Code α` value is not intrinsically coherent.
+
+Metaprograms can be dependently typed and produce proof terms:
+
+```lean
+def zero_mul [Staged] (x y : Code Nat) (h : Code (~x = 0 * ~y)) : Code (~x = 0) :=
+  `⟨by simpa using ~h⟩
+```
 
 ## Design and implementation
 
-Thyme is based on András Kovács's [*Staged Compilation with Two-Level Type Theory*](https://dl.acm.org/doi/10.1145/3547641), extended to arbitrarily nested stages. Unlike the calculus presented there, Thyme uses Lean's ordinary universes at every stage. Of the two inverse laws, only `` ~`⟨e⟩ = e `` holds definitionally, while `` `⟨~c⟩ = c `` holds propositionally.
+Thyme implements a staging type system inspired by András Kovács's [*Staged Compilation with Two-Level Type Theory*](https://dl.acm.org/doi/10.1145/3547641). Our implementation must account for two components of a metaprogram: a denotational component given by a Lean term of the object-level type, and a code generator given by a `MetaM Expr` action. A simple representation as a product of these components is not viable, however, because the denotation of an open object-level term is not available during code generation. For example, to elaborate the term ``fun (x : α) => ~(f `⟨x⟩)``, the function `f` must be invoked with a `Code α` whose code generator produces a reference to `x`, at a point where no actual value of type `α` is available. Dropping metaprogram denotations altogether would avoid this difficulty, at the cost of introducing separate machinery to represent and check object-level types. Having denotations allows the typing rule for splicing to be realized directly in Lean: a splice of `c : Code α` can be elaborated as its denotation, an ordinary Lean term of type `α`, and Thyme can therefore rely on Lean itself to check object-level types and terms. The encoding must make denotations available for this purpose without requiring them during code generation.
 
-The definition of `Code` is basically:
+We achieve this with an encoding parameterized by an interpretation selector, in which both the object-level type and term denotations are conditional on the denotation selector, while the code generator is conditional on the generator selector:
 
 ```lean
-structure Code (α : Sort u) : Sort (max 1 u) where
-  get : Unit → α
-  xfc : False → MetaM Expr
+inductive Interp where
+  | den
+  | gen
+
+structure Code (i : Interp) (α : i = .den → Sort u) where
+  den : (h : i = .den) → α h
+  gen : i = .gen → MetaM Expr
 ```
 
-`xfc` stands for *ex falso code generator*. Recall that quotations may be nested and that inner quotations may refer to variables bound in enclosing ones. During code generation, these variables are available as syntax, but not as values of their Lean types. The transformation must nevertheless construct `Code α` terms for nested quotations, since they may be passed to ordinary functions. Under a local assumption of `False`, it therefore supplies the denotational component by ex falso. The `get` field is thunked so that this placeholder is never evaluated merely by constructing the `Code` term. Crucially, no proof of `False` appears in kernel-facing terms, and this mechanism introduces no additional axioms.
+From an interpretation-polymorphic `c : ∀ i, Code i α`, we can obtain both components. A meta-level function must be polymorphic as a whole, as in `∀ i, Code i α → Code i β`, so as to be usable under either interpretation, in particular without requiring denotations during code generation.
+
+To avoid threading the selector explicitly, it is packaged in the `Staged` type class:
+
+```lean
+class Staged where
+  interp : Interp
+```
+
+A declaration with a `[Staged]` parameter is therefore interpretation-polymorphic in the way required of meta-level functions.
