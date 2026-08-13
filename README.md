@@ -8,7 +8,7 @@ We can implement exponentiation as a staged function of a statically known expon
 
 ```lean
 import Thyme
-open Thyme
+open Thyme.Prelude
 
 def exp [Staged] (x : Code Nat) : Nat → Code Nat
   | 0 => `⟨1⟩

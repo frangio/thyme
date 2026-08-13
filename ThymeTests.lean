@@ -5,7 +5,7 @@ import ThymeTests.Examples.FoldrFusion
 meta import ThymeTests.Guard
 meta import ThymeTests.Imported
 
-open Thyme
+open Thyme.Prelude
 open Lean Meta
 
 set_option thyme.checkCoherence true
@@ -181,7 +181,7 @@ Note: The following definitions were not unfolded because their definition is no
 
 /-- Deliberately bypasses staging syntax to exercise the trusted generator boundary. -/
 def incoherent [Staged] : Code Nat :=
-  Code.mk (fun _ => 0) (.mk fun _ => pure (mkNatLit 1))
+  Thyme.Code.mk (fun _ => 0) (.mk fun _ => pure (mkNatLit 1))
 
 example : incoherent.den = 0 := rfl
 

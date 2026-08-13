@@ -2,7 +2,7 @@ module
 
 public import Thyme
 
-open Thyme
+open Thyme.Prelude
 
 public section
 

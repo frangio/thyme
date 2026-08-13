@@ -3,7 +3,7 @@ module
 import Thyme
 meta import ThymeTests.Guard
 
-open Thyme
+open Thyme.Prelude
 
 set_option thyme.checkCoherence true
 

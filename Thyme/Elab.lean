@@ -2,6 +2,7 @@ module
 
 public meta import Lean.Elab.SyntheticMVars
 public meta import Lean.PrettyPrinter.Delaborator.Builtins
+public import Thyme.Syntax
 public meta import Thyme.Elab.Context
 public meta import Thyme.Elab.Common
 public meta import Thyme.Elab.Check
@@ -15,6 +16,7 @@ public import Thyme.Elab.Runtime
 public import Thyme.Elab.Lemmas
 
 open Lean Meta
+open Thyme.Prelude
 
 namespace Thyme.Elab
 
@@ -138,11 +140,7 @@ def mkGen (u : Level) (level : Int) (staged typeDen den : Expr)
 
 public section
 
-syntax:lead (name := indexedCodeStx) "Code " term:arg : term
-syntax:max (name := indexedQuoteStx) "`⟨" term "⟩" : term
-syntax:max (name := indexedSpliceStx) "~" term:max : term
-
-@[term_elab indexedCodeStx]
+@[term_elab Thyme.Prelude.codeStx]
 def elabCode : TermElab := fun stx expectedType? => do
   let `(Code $typeStx) := stx | throwUnsupportedSyntax
   let u ← mkFreshLevelMVar
@@ -158,7 +156,7 @@ def elabCode : TermElab := fun stx expectedType? => do
   let code := mkCodeType u staged typeDen
   ensureHasType expectedType? code (errorMsgHeader? := "Code")
 
-@[term_elab indexedQuoteStx]
+@[term_elab Thyme.Prelude.quoteStx]
 def elabQuote : TermElab := fun stx expectedType? => do
   let `(`⟨$bodyStx⟩) := stx | throwUnsupportedSyntax
   let expectedType ← expectedType?.getDM mkFreshTypeMVar
@@ -177,7 +175,7 @@ def elabQuote : TermElab := fun stx expectedType? => do
   let quote := mkCode u staged typeDen den gen
   ensureHasType expectedType quote (errorMsgHeader? := "quotation")
 
-@[term_elab indexedSpliceStx]
+@[term_elab Thyme.Prelude.spliceStx]
 def elabSplice : TermElab := fun stx expectedType? => do
   let `(~$codeStx) := stx | throwUnsupportedSyntax
   escapeDenContext fun isRoot level staged hDen => do
