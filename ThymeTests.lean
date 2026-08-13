@@ -1,33 +1,14 @@
 module
 
 import Thyme
-public meta import ThymeTests.Imported
-public meta import Lean.Elab.Tactic.Guard
+import ThymeTests.Examples.FoldrFusion
+meta import ThymeTests.Guard
+meta import ThymeTests.Imported
 
 open Thyme
-open Lean Elab Command Term Meta
-open Lean.Parser Lean.Parser.Tactic Lean.Parser.Command
-open Lean.Elab.Tactic.GuardExpr
+open Lean Meta
 
 set_option thyme.checkCoherence true
-
-public section
-
-/-- Variant of `#guard_expr` that prints elaborated terms on error. -/
-elab "#guard_staged " r:term:51 eq:equal p:term : command =>
-  Lean.Elab.Command.runTermElabM fun _ => Term.withoutErrToSorry do
-    let some mk := equal.toMatchKind eq | throwUnsupportedSyntax
-    let r ← elabTerm r none
-    let p ← elabTerm p none
-    _ ← isDefEqGuarded (← inferType r) (← inferType p)
-    synthesizeSyntheticMVarsNoPostponing
-    let r ← instantiateMVars r
-    let p ← instantiateMVars p
-    let res ← mk.isEq r p
-    unless res do throwError m!"Elaborated term:{indentExpr r}\n\
-      is not {mk.toStringDescr} expected term:{indentExpr p}"
-
-end
 
 def idc [Staged] (α : Code Type) (a : Code ~α) : Code ~α := a
 
