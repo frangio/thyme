@@ -8,8 +8,6 @@ meta import ThymeTests.Imported
 open Thyme.Prelude
 open Lean Meta
 
-set_option thyme.checkCoherence true
-
 def idc [Staged] (α : Code Type) (a : Code ~α) : Code ~α := a
 
 #guard_staged idc `⟨Bool⟩ `⟨true⟩ =~ `⟨true⟩

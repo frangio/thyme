@@ -5,8 +5,6 @@ meta import ThymeTests.Guard
 
 open Thyme.Prelude
 
-set_option thyme.checkCoherence true
-
 namespace ThymeTests.Examples.FoldrFusion
 
 /-!

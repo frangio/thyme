@@ -14,3 +14,4 @@ precompileModules = true
 
 [[lean_lib]]
 name = "ThymeTests"
+leanOptions.weak.thyme.checkCoherence = true
