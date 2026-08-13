@@ -2,6 +2,20 @@
 
 Thyme is a Lean library for typed metaprogramming based on staging, with support for dependent types and reasoning about metaprograms.
 
+## Installation
+
+```toml
+# lakefile.toml
+[[require]]
+name = "thyme"
+git = "https://github.com/frangio/thyme"
+```
+
+```lean
+import Thyme
+open Thyme.Prelude
+```
+
 ## Examples
 
 We can implement exponentiation as a staged function of a statically known exponent:
