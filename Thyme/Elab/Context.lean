@@ -22,8 +22,13 @@ public def mkRawIntLit : Int → Expr
   | .negSucc n => .app (.const ``Int.negSucc []) (mkRawNatLit n)
 
 public def rawIntLit? : Expr → Option Int
-  | .app (.const ``Int.ofNat []) (mkRawNatLit n) => some (.ofNat n)
-  | .app (.const ``Int.negSucc []) (mkRawNatLit n) => some (.negSucc n)
+  | .app (.const name _) (mkRawNatLit n) =>
+    if name == ``Int.ofNat then
+      some (.ofNat n)
+    else if name == ``Int.negSucc then
+      some (.negSucc n)
+    else
+      none
   | _ => none
 
 structure ContextEntry where

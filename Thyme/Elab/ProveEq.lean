@@ -130,8 +130,9 @@ partial def proveHEq? (source target : Expr) (retryWhnf := true) : MetaM (Option
   let sourceType ← whnf (← inferType source)
   let targetType ← whnf (← inferType target)
   match sourceType, targetType with
-  | mkApp2 (.const ``Code _) _ _, mkApp2 (.const ``Code _) _ _ =>
-    return ← mkAppM ``Code.heq_of_gen #[hGen, source, target]
+  | mkApp2 (.const sourceTypeFn _) _ _, mkApp2 (.const targetTypeFn _) _ _ =>
+    if sourceTypeFn == ``Code && targetTypeFn == ``Code then
+      return ← mkAppM ``Code.heq_of_gen #[hGen, source, target]
   | .forallE _ sourceDomain _ _, .forallE _ targetDomain _ _ =>
     let eqDenType := mkEqDen staged
     if ← isDefEq sourceDomain eqDenType then
