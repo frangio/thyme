@@ -59,8 +59,13 @@ def ensureNoMVars (e : Expr) : TermElabM Unit := do
     let levelMVars := (collectLevelMVars {} e).result
     if ← logUnassignedLevelMVarsUsingErrorInfos levelMVars then
       throwAbortTerm
-    throwMVarError <| m!"staged term contains unresolved metavariables\n\
-      {MessageData.joinSep (mvars.toList.map MessageData.ofGoal) m!"\n\n"}"
+    let e ← exposeLevelMVars (← instantiateMVars e)
+    let msg := if mvars.isEmpty then
+      m!"staged term contains unresolved universe levels{indentExpr e}"
+    else
+      m!"staged term contains unresolved metavariables{indentExpr e}\n\
+        {MessageData.joinSep (mvars.toList.map MessageData.ofGoal) m!"\n\n"}"
+    throwMVarError msg
 
 /-- Elaborate `stx` under `hDen` and abstract it as a denotational component. -/
 def elabDen (hDen : Expr) (stx : Syntax) (expectedType : Expr) : TermElabM Expr := do
