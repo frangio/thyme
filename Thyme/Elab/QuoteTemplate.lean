@@ -2,7 +2,7 @@ module
 
 public import Lean.Elab.Term.TermElabM
 
-open Lean Meta
+open Lean Meta Elab Term
 
 namespace Thyme.Elab
 
@@ -35,10 +35,10 @@ Registers a quote template under the declaration being elaborated, and returns
 `instantiateQuoteTemplate` partially applied to the lookup parameters, with
 type `Array Expr → Array (MetaM Expr) → MetaM Expr`.
 -/
-public def registerQuoteTemplate (template : Expr) : Lean.Elab.Term.TermElabM Expr := do
+public def registerQuoteTemplate (template : Expr) : TermElabM Expr := do
   if template.hasMVar then
     throwError "internal staging error: quote template contains metavariables"
-  let declName := (← Lean.Elab.Term.getDeclName?).getD .anonymous
+  let declName := (← getDeclName?).getD .anonymous
   let templates := quoteTemplatesExt.find? (← getEnv) declName |>.getD #[]
   let index := templates.size
   modifyEnv fun env => quoteTemplatesExt.insert env declName (templates.push template)

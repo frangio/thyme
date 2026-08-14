@@ -2,20 +2,19 @@ module
 
 public meta import Lean.Elab.SyntheticMVars
 public meta import Lean.PrettyPrinter.Delaborator.Builtins
-public import Thyme.Syntax
 public meta import Thyme.Elab.Context
 public meta import Thyme.Elab.Common
-public meta import Thyme.Elab.Check
-public meta import Thyme.Elab.Runtime
-public meta import Thyme.Elab.Transform
-public import Thyme.Elab.Linter
+public meta import Thyme.Elab.Transform -- shake: keep
+public meta import Thyme.Elab.Check -- shake: keep
 public import Thyme.Code
-public import Thyme.Elab.Check
-public import Thyme.Elab.Transform
-public import Thyme.Elab.Runtime
+public import Thyme.Syntax
 public import Thyme.Elab.Lemmas
+public import Thyme.Elab.QuoteTemplate
 
 open Lean Meta
+open PrettyPrinter Delaborator
+open PrettyPrinter.Delaborator.SubExpr
+
 open Thyme.Prelude
 
 namespace Thyme.Elab
@@ -209,9 +208,6 @@ def elabSplice : TermElab := fun stx expectedType? => do
             generated:{indentExpr result}\n\
             denotation:{indentExpr denotation}{note}"
     return coeResult
-
-open PrettyPrinter Delaborator
-open PrettyPrinter.Delaborator.SubExpr
 
 @[app_delab «Code»]
 def delabCode : Delab :=

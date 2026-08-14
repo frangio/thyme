@@ -1,12 +1,12 @@
 module
 
 public import Lean.Elab.Term.TermElabM
-import Thyme.Elab.Common
-import Thyme.Elab.TypedOpTransform
-import Thyme.Elab.Check
 import Lean.Meta.Eval
 import Thyme.Code
-import Thyme.Elab.Runtime
+import Thyme.Elab.Check
+import Thyme.Elab.Common
+import Thyme.Elab.TypedOpTransform
+import Thyme.Elab.QuoteTemplate
 import Thyme.Elab.ProveEq
 
 namespace Thyme.Elab

@@ -1,8 +1,8 @@
 module
 
 public import Lean.Meta.Basic
-import Thyme.Elab.Context
 import Thyme.Code
+import Thyme.Elab.Context
 
 open Lean Meta Elab
 
