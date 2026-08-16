@@ -142,6 +142,11 @@ def mkGen (u : Level) (level : Int) (staged typeDen den : Expr)
       return mkApp2 (mkConst ``Codegen.mk) (mkStagedInterp staged) action
   return .app (mkConst ``Codegen.stub) (mkStagedInterp staged)
 
+def freshenExprMVars (e : Expr) : MetaM Expr := do
+  let e ← abstractMVars e (levels := false)
+  let (_, _, e) ← openAbstractMVarsResult e
+  pure e
+
 public section
 
 @[term_elab Thyme.Prelude.codeStx]
@@ -183,36 +188,45 @@ def elabQuote : TermElab := fun stx expectedType? => do
 def elabSplice : TermElab := fun stx expectedType? => do
   let `(~$codeStx) := stx | throwUnsupportedSyntax
   escapeDenContext fun isRoot level staged hDen => do
-    let expectedType ← expectedType?.getDM mkFreshTypeMVar
-    let u ← getLevel expectedType
-    let typeDen ← mkLambdaFVars #[hDen] expectedType
-    let codeType := mkCodeType u staged typeDen
     if !isRoot then
+      let typeDenBody ← expectedType?.getDM mkFreshTypeMVar
+      let u ← getLevel typeDenBody
+      let typeDen ← mkLambdaFVars #[hDen] typeDenBody
+      let codeType := mkCodeType u staged typeDen
       let code ← elabTermEnsuringType codeStx (some codeType)
       let splice := mkCodeDen u staged typeDen code hDen
       return splice
-    let code ← withoutErrToSorry <| withSynthesize do
-      let code ← elabTerm codeStx (some codeType)
-      if let some (mkApp2 _ codeStaged _) ← whnfUntil (← inferType code) ``«Code» then
-        unless ← isDefEq codeStaged staged do
-          throwError "cannot splice code from a different staging context"
-      ensureHasType (some codeType) code
-    let code ← instantiateMVars code
-    let typeDen ← instantiateMVars typeDen
-    let splice := mkCodeDen u staged typeDen code hDen
-    let result ← evalSplice level staged splice
-    let coeResult ← ensureHasType (some expectedType) result
-    if ← checkCoherence.getM then
-      let code ← code.replaceFVarsM #[staged, hDen]
-        #[mkStaged (mkConst ``Interp.den), ← mkEqRefl (mkConst ``Interp.den)]
-      let denotation ← mkAppM ``Code.den #[code]
-      withNewMCtxDepth do
-        unless ← isDefEq result denotation do
-          let note ← mkUnfoldAxiomsNote result denotation
-          throwError m!"generated code is not definitionally equal to its denotation\n\
-            generated:{indentExpr result}\n\
-            denotation:{indentExpr denotation}{note}"
-    return coeResult
+    else
+      let typeDenBody ← if let some expectedType := expectedType? then
+        freshenExprMVars expectedType
+      else
+        mkFreshTypeMVar
+      let u ← getLevel typeDenBody
+      let typeDen ← mkLambdaFVars #[hDen] typeDenBody
+      let codeType := mkCodeType u staged typeDen
+      let code ← withoutErrToSorry <| withSynthesize do
+        let code ← elabTerm codeStx (some codeType)
+        if let some (mkApp2 _ codeStaged _) ← whnfUntil (← inferType code) ``«Code» then
+          unless ← isDefEq codeStaged staged do
+            throwError "cannot splice code from a different staging context"
+        ensureHasType (some codeType) code
+      let code ← instantiateMVars code
+      let typeDenBody ← instantiateMVars typeDenBody
+      let typeDen ← mkLambdaFVars #[hDen] typeDenBody
+      let splice := mkCodeDen u staged typeDen code hDen
+      let result ← evalSplice level staged splice
+      let coeResult ← ensureHasType expectedType? result
+      if ← checkCoherence.getM then
+        let code ← code.replaceFVarsM #[staged, hDen]
+          #[mkStaged (mkConst ``Interp.den), ← mkEqRefl (mkConst ``Interp.den)]
+        let denotation ← mkAppM ``Code.den #[code]
+        withNewMCtxDepth do
+          unless ← isDefEq result denotation do
+            let note ← mkUnfoldAxiomsNote result denotation
+            throwError m!"generated code is not definitionally equal to its denotation\n\
+              generated:{indentExpr result}\n\
+              denotation:{indentExpr denotation}{note}"
+      return coeResult
 
 @[app_delab «Code»]
 def delabCode : Delab :=

@@ -116,6 +116,13 @@ def dependentArg [Staged] (x : Code Nat) (h : Code (~x = 0)) :
 
 #guard_staged `⟨~(dependentArg `⟨0⟩ `⟨rfl⟩)⟩ =~ `⟨⟨0, rfl⟩⟩
 
+def dependentRootSplice [Staged] (n : Code Nat) : Code (Fin (~n + 1)) :=
+  `⟨0⟩
+
+/-- info: 0 -/
+#guard_msgs in
+#eval ~(dependentRootSplice `⟨1⟩)
+
 /-- error: staging error: variable `x` is not available in the current staging context -/
 #guard_msgs in
 #check ~(let x := 'c'; `⟨x⟩)
