@@ -159,7 +159,7 @@ namespace TransformM
 
 mutual
 
-variable (staged hGen : Expr)
+variable (instStaged hGen : Expr)
 
 partial def transform (dir : TypingDir) (expected : dir.Input) (e : Expr) :
     TransformM (dir.Result Expr) :=
@@ -168,7 +168,7 @@ partial def transform (dir : TypingDir) (expected : dir.Input) (e : Expr) :
 partial def coerce (e : Expr) (sourceType targetType : Closure) :
     TransformM Expr := do
   if ← isGenContext then
-    maybeCast e (← proveEq? staged hGen
+    maybeCast e (← proveEq? instStaged hGen
       sourceType.instantiate targetType.instantiate)
   else
     return e
@@ -190,12 +190,12 @@ partial def transformCode (dir : TypingDir) (_ : dir.Input)
   let sourceTypeDen := args[1]
   let typeDen ←
     if ← isGenContext then
-      pure (mkErasedTypeDen u staged)
+      pure (mkErasedTypeDen u instStaged)
     else
       let typeDen ← enterCodeContext do
         transform .synth () sourceTypeDen
       pure typeDen.val
-  return .mk (mkApp2 fn staged typeDen)
+  return .mk (mkApp2 fn instStaged typeDen)
     (.ofUnchangedExpr (.sort (mkLevelMax' .one u)))
 
 partial def transformQuoteTree (sourceDen : Expr) : TransformM StagingTree := do
@@ -216,27 +216,27 @@ partial def transformQuote (dir : TypingDir) (expectedType? : dir.Input)
   let tree ← transformQuoteTree sourceDen
   let actionBody ← recordChild metaMExprType tree
   let action ← mkLambdaFVars #[hGen] actionBody
-  let interp := mkStagedInterp staged
+  let interp := mkStagedInterp instStaged
   let gen := mkApp2 (mkConst ``Codegen.mk) interp action
   let expectedTypeDen? ← expectedType?.toOption.mapM fun expectedType => do
     let expectedType ← whnf expectedType.instantiate
     let_expr Code _ expectedTypeDen := expectedType
       | throwInternalStagingError
     pure expectedTypeDen
-  let typeDen := expectedTypeDen?.getD (mkErasedTypeDen u staged)
-  let quote := mkApp4 (mkConst ``Code.ofGen [u]) staged typeDen gen hGen
+  let typeDen := expectedTypeDen?.getD (mkErasedTypeDen u instStaged)
+  let quote := mkApp4 (mkConst ``Code.ofGen [u]) instStaged typeDen gen hGen
   return .mk quote
-    (.ofChangedExpr (mkCodeType u staged typeDen))
+    (.ofChangedExpr (mkCodeType u instStaged typeDen))
 
 partial def transformSpliceTree (u : Level) (sourceBody : Expr) :
     TransformM StagingTree := do
   unless ← isGenContext do
     throwInternalStagingError
-  let interp := mkStagedInterp staged
-  let typeDen := mkErasedTypeDen u staged
-  let bodyType := mkCodeType u staged typeDen
+  let interp := mkStagedInterp instStaged
+  let typeDen := mkErasedTypeDen u instStaged
+  let bodyType := mkCodeType u instStaged typeDen
   let body ← transform .check (.ofChangedExpr bodyType) sourceBody
-  let gen := mkApp3 (mkConst ``Code.gen [u]) staged typeDen body
+  let gen := mkApp3 (mkConst ``Code.gen [u]) instStaged typeDen body
   let body := mkApp3 (mkConst ``Codegen.run) interp gen hGen
   let .splice (some children) ← get | throwInternalStagingError
   return { body, children }
@@ -257,9 +257,9 @@ partial def transformSplice (dir : TypingDir) (expectedType? : dir.Input)
     return .mk hole holeType
   | .code =>
     enterSpliceContext do
-      let bodyType := mkCodeType u staged sourceTypeDen
+      let bodyType := mkCodeType u instStaged sourceTypeDen
       let body ← transform .check (.ofUnchangedExpr bodyType) sourceBody
-      let e := mkApp4 spliceFn staged sourceTypeDen body hDen
+      let e := mkApp4 spliceFn instStaged sourceTypeDen body hDen
       coeResult coerce expectedType? e sourceType
   | _ =>
     throwInternalStagingError
@@ -282,28 +282,28 @@ unsafe def evalCodegenImpl (codegen : Expr) : MetaM Expr := do
 @[implemented_by evalCodegenImpl]
 opaque evalCodegen (codegen : Expr) : MetaM Expr
 
-public def evaluateSplice (level : Int) (staged splice : Expr) : TermElabM Expr := do
-  checkStages splice staged.fvarId? (startLevel := level)
+public def evaluateSplice (stage : Int) (instStaged splice : Expr) : TermElabM Expr := do
+  checkStages splice instStaged.fvarId? (startStage := stage)
   let_expr fn@Code.den' _ _ sourceBody _ := splice | throwInternalStagingError
   let .const _ [u] := fn | unreachable!
   runTransform do
     let hGenName ← mkFreshUserName hGenName
-    withLocalDeclD hGenName (mkEqGen staged) fun hGen => do
+    withLocalDeclD hGenName (mkEqGen instStaged) fun hGen => do
       enterSpliceContext do
-        let tree ← .transformSpliceTree staged hGen u sourceBody
+        let tree ← .transformSpliceTree instStaged hGen u sourceBody
         let action ← buildSplice tree #[] #[]
         let action ← mkLambdaFVars #[hGen] action
-        let interp := mkStagedInterp staged
+        let interp := mkStagedInterp instStaged
         let codegen := mkApp2 (mkConst ``Codegen.mk) interp action
-        let codegen := codegen.replaceFVars #[staged]
+        let codegen := codegen.replaceFVars #[instStaged]
           #[mkStaged (mkConst ``Interp.gen)]
         evalCodegen codegen
 
-public def compileQuote (level : Int) (staged hGen quote : Expr) : TermElabM Expr := do
-  checkStages quote (startLevel := level)
+public def compileQuote (stage : Int) (instStaged hGen quote : Expr) : TermElabM Expr := do
+  checkStages quote (startStage := stage)
   let_expr Code.mk _ _ sourceDen _ := quote | throwInternalStagingError
   runTransform do
-    let tree ← .transformQuoteTree staged hGen sourceDen
+    let tree ← .transformQuoteTree instStaged hGen sourceDen
     buildQuote tree #[] #[]
 
 end Thyme.Elab

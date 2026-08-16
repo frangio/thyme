@@ -20,17 +20,17 @@ open Thyme.Prelude
 namespace Thyme.Elab
 
 public inductive PendingCodeCheck
-    (level : Int)
-    (staged : Staged)
-    (typeDen : staged.interp = .den → Sort u) : Prop where
-  | done : PendingCodeCheck level staged typeDen
+    (stage : Int)
+    (instStaged : Staged)
+    (typeDen : instStaged.interp = .den → Sort u) : Prop where
+  | done : PendingCodeCheck stage instStaged typeDen
 
 public abbrev PendingQuoteAction
-    (_level : Int)
-    (staged : Staged)
-    (typeDen : staged.interp = .den → Sort u)
-    (_den : (hDen : staged.interp = .den) → typeDen hDen)
-    (_hGen : staged.interp = .gen) : Type :=
+    (_stage : Int)
+    (instStaged : Staged)
+    (typeDen : instStaged.interp = .den → Sort u)
+    (_den : (hDen : instStaged.interp = .den) → typeDen hDen)
+    (_hGen : instStaged.interp = .gen) : Type :=
   MetaM Expr
 
 meta section
@@ -47,8 +47,8 @@ def checkCoherence : Lean.Option Bool where
   name := `thyme.checkCoherence
   defValue := false
 
-def isDen (staged : Expr) : MetaM Bool :=
-  withNewMCtxDepth <| isDefEq (mkStagedInterp staged) (mkConst ``Interp.den)
+def isDen (instStaged : Expr) : MetaM Bool :=
+  withNewMCtxDepth <| isDefEq (mkStagedInterp instStaged) (mkConst ``Interp.den)
 
 def ensureNoMVars (e : Expr) : TermElabM Unit := do
   if e.hasMVar then
@@ -89,58 +89,58 @@ def mkPendingTacticMVar
         .tactic tacticCode (← saveContext) .term (delayOnMVars := true)
       return goal)
 
-/-- `PendingCodeCheck.{u} level staged typeDen` -/
+/-- `PendingCodeCheck.{u} stage instStaged typeDen` -/
 @[match_pattern]
-def mkPendingCodeCheck (u : Level) (level staged typeDen : Expr) : Expr :=
-  mkApp3 (.const ``PendingCodeCheck [u]) level staged typeDen
+def mkPendingCodeCheck (u : Level) (stage instStaged typeDen : Expr) : Expr :=
+  mkApp3 (.const ``PendingCodeCheck [u]) stage instStaged typeDen
 
 def finalizeCodeCheck (target : Expr) : TermElabM Expr := do
   let target ← instantiateMVars target
-  let mkPendingCodeCheck u level staged typeDen := target
+  let mkPendingCodeCheck u stage instStaged typeDen := target
     | throwError "malformed pending code check"
-  let some levelValue := rawIntLit? level | throwError "malformed pending code check"
-  let codeType := mkCodeType u staged typeDen
+  let some stageValue := rawIntLit? stage | throwError "malformed pending code check"
+  let codeType := mkCodeType u instStaged typeDen
   ensureNoMVars codeType
-  checkStages codeType (startLevel := levelValue)
-  return mkApp3 (.const ``PendingCodeCheck.done [u]) level staged typeDen
+  checkStages codeType (startStage := stageValue)
+  return mkApp3 (.const ``PendingCodeCheck.done [u]) stage instStaged typeDen
 
-/-- `PendingQuoteAction.{u} level staged typeDen den hGen` -/
+/-- `PendingQuoteAction.{u} stage instStaged typeDen den hGen` -/
 @[match_pattern]
-def mkPendingQuoteAction (u : Level) (level staged typeDen den hGen : Expr) : Expr :=
-  mkApp5 (.const ``PendingQuoteAction [u]) level staged typeDen den hGen
+def mkPendingQuoteAction (u : Level) (stage instStaged typeDen den hGen : Expr) : Expr :=
+  mkApp5 (.const ``PendingQuoteAction [u]) stage instStaged typeDen den hGen
 
 /-- Finalize a pending quotation generator action. -/
 def finalizeQuoteAction (target : Expr) : TermElabM Expr := do
   let target ← instantiateMVars target
-  let mkPendingQuoteAction u level staged typeDen den hGen := target
+  let mkPendingQuoteAction u stage instStaged typeDen den hGen := target
     | throwError "malformed pending quotation action"
-  let some level := rawIntLit? level | throwError "malformed pending quotation action"
-  let gen := .app (mkConst ``Codegen.stub) (mkStagedInterp staged)
-  let quote := mkCode u staged typeDen den gen
+  let some stage := rawIntLit? stage | throwError "malformed pending quotation action"
+  let gen := .app (mkConst ``Codegen.stub) (mkStagedInterp instStaged)
+  let quote := mkCode u instStaged typeDen den gen
   ensureNoMVars quote
-  compileQuote level staged hGen quote
+  compileQuote stage instStaged hGen quote
 
-def evalSplice (level : Int) (staged splice : Expr) : TermElabM Expr := do
+def evalSplice (stage : Int) (instStaged splice : Expr) : TermElabM Expr := do
   let splice ← instantiateMVars splice
   ensureNoMVars splice
-  evaluateSplice level staged splice
+  evaluateSplice stage instStaged splice
 
 /--
 For a context-owning quote that may be generative, create a pending generator
 action. Otherwise, return a stub generator.
 -/
-def mkGen (u : Level) (level : Int) (staged typeDen den : Expr)
+def mkGen (u : Level) (stage : Int) (instStaged typeDen den : Expr)
     (ownsContext : Bool) : TermElabM Expr := do
   if ownsContext then
-    unless ← isDen staged do
+    unless ← isDen instStaged do
       let hGenName ← mkFreshUserName hGenName
-      let action ← withLocalDeclD hGenName (mkEqGen staged) fun hGen => do
+      let action ← withLocalDeclD hGenName (mkEqGen instStaged) fun hGen => do
         let actionType :=
-          mkPendingQuoteAction u (mkRawIntLit level) staged typeDen den hGen
+          mkPendingQuoteAction u (mkRawIntLit stage) instStaged typeDen den hGen
         let actionBody ← mkPendingTacticMVar actionType finalizeQuoteAction
         mkLambdaFVars #[hGen] actionBody
-      return mkApp2 (mkConst ``Codegen.mk) (mkStagedInterp staged) action
-  return .app (mkConst ``Codegen.stub) (mkStagedInterp staged)
+      return mkApp2 (mkConst ``Codegen.mk) (mkStagedInterp instStaged) action
+  return .app (mkConst ``Codegen.stub) (mkStagedInterp instStaged)
 
 def freshenExprMVars (e : Expr) : MetaM Expr := do
   let e ← abstractMVars e (levels := false)
@@ -155,14 +155,14 @@ def elabCode : TermElab := fun stx expectedType? => do
   let u ← mkFreshLevelMVar
   if let some expectedType := expectedType? then
     discard <| isDefEq expectedType (.sort (.max .one u))
-  let (ownsContext, staged, level, typeDen) ←
+  let (ownsContext, instStaged, stage, typeDen) ←
     enterDenContext fun _ hDen =>
       elabDen hDen typeStx (.sort u)
   if ownsContext then
-    unless ← isDen staged do
-      let checkType := mkPendingCodeCheck u (mkRawIntLit level) staged typeDen
+    unless ← isDen instStaged do
+      let checkType := mkPendingCodeCheck u (mkRawIntLit stage) instStaged typeDen
       discard <| mkPendingTacticMVar checkType finalizeCodeCheck
-  let code := mkCodeType u staged typeDen
+  let code := mkCodeType u instStaged typeDen
   ensureHasType expectedType? code (errorMsgHeader? := "Code")
 
 @[term_elab Thyme.Prelude.quoteStx]
@@ -171,30 +171,30 @@ def elabQuote : TermElab := fun stx expectedType? => do
   let expectedType ← expectedType?.getDM mkFreshTypeMVar
   let u ← mkFreshLevelMVar
   let codeStaged ← mkFreshExprMVar (some (mkConst ``Staged))
-  let (ownsContext, staged, level, typeDen, den) ←
-    enterDenContext fun contextStaged hDen => do
-      discard <| isDefEq codeStaged contextStaged
+  let (ownsContext, instStaged, stage, typeDen, den) ←
+    enterDenContext fun contextInstStaged hDen => do
+      discard <| isDefEq codeStaged contextInstStaged
       let typeDenBody ← mkFreshExprMVar (some (.sort u))
       let typeDen ← mkLambdaFVars #[hDen] typeDenBody
       let codeType := mkCodeType u codeStaged typeDen
       discard <| isDefEq expectedType codeType
       let den ← elabDen hDen bodyStx typeDenBody
       return (typeDen, den)
-  let gen ← mkGen u level staged typeDen den ownsContext
-  let quote := mkCode u staged typeDen den gen
+  let gen ← mkGen u stage instStaged typeDen den ownsContext
+  let quote := mkCode u instStaged typeDen den gen
   ensureHasType expectedType quote (errorMsgHeader? := "quotation")
 
 @[term_elab Thyme.Prelude.spliceStx]
 def elabSplice : TermElab := fun stx expectedType? => do
   let `(~$codeStx) := stx | throwUnsupportedSyntax
-  escapeDenContext fun isRoot level staged hDen => do
+  escapeDenContext fun isRoot stage instStaged hDen => do
     if !isRoot then
       let typeDenBody ← expectedType?.getDM mkFreshTypeMVar
       let u ← getLevel typeDenBody
       let typeDen ← mkLambdaFVars #[hDen] typeDenBody
-      let codeType := mkCodeType u staged typeDen
+      let codeType := mkCodeType u instStaged typeDen
       let code ← elabTermEnsuringType codeStx (some codeType)
-      let splice := mkCodeDen u staged typeDen code hDen
+      let splice := mkCodeDen u instStaged typeDen code hDen
       return splice
     else
       let typeDenBody ← if let some expectedType := expectedType? then
@@ -203,21 +203,21 @@ def elabSplice : TermElab := fun stx expectedType? => do
         mkFreshTypeMVar
       let u ← getLevel typeDenBody
       let typeDen ← mkLambdaFVars #[hDen] typeDenBody
-      let codeType := mkCodeType u staged typeDen
+      let codeType := mkCodeType u instStaged typeDen
       let code ← withoutErrToSorry <| withSynthesize do
         let code ← elabTerm codeStx (some codeType)
         if let some (mkApp2 _ codeStaged _) ← whnfUntil (← inferType code) ``«Code» then
-          unless ← isDefEq codeStaged staged do
+          unless ← isDefEq codeStaged instStaged do
             throwError "cannot splice code from a different staging context"
         ensureHasType (some codeType) code
       let code ← instantiateMVars code
       let typeDenBody ← instantiateMVars typeDenBody
       let typeDen ← mkLambdaFVars #[hDen] typeDenBody
-      let splice := mkCodeDen u staged typeDen code hDen
-      let result ← evalSplice level staged splice
+      let splice := mkCodeDen u instStaged typeDen code hDen
+      let result ← evalSplice stage instStaged splice
       let coeResult ← ensureHasType expectedType? result
       if ← checkCoherence.getM then
-        let code ← code.replaceFVarsM #[staged, hDen]
+        let code ← code.replaceFVarsM #[instStaged, hDen]
           #[mkStaged (mkConst ``Interp.den), ← mkEqRefl (mkConst ``Interp.den)]
         let denotation ← mkAppM ``Code.den #[code]
         withNewMCtxDepth do

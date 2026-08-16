@@ -11,8 +11,8 @@ namespace Thyme.Elab
 structure CheckState where
   binders : Array Name
   segmentStarts : Array Nat
-  segmentLevels : Array Int
-  segmentSizes : segmentStarts.size = segmentLevels.size
+  segmentStages : Array Int
+  segmentSizes : segmentStarts.size = segmentStages.size
 
 structure CheckContext where
   stagedFVarId? : Option FVarId
@@ -25,11 +25,11 @@ def pushBinder (name : Name) : CheckM PUnit :=
 def popBinder : CheckM PUnit :=
   modify fun s => { s with binders := s.binders.pop }
 
-def pushSegment (level : Int) : CheckM PUnit :=
+def pushSegment (stage : Int) : CheckM PUnit :=
   modify fun s => {
     s with
     segmentStarts := s.segmentStarts.push s.binders.size
-    segmentLevels := s.segmentLevels.push level
+    segmentStages := s.segmentStages.push stage
     segmentSizes := by simp [s.segmentSizes]
   }
 
@@ -37,12 +37,12 @@ def popSegment : CheckM PUnit :=
   modify fun s => {
     s with
     segmentStarts := s.segmentStarts.pop
-    segmentLevels := s.segmentLevels.pop
+    segmentStages := s.segmentStages.pop
     segmentSizes := by simp [s.segmentSizes]
   }
 
-def currentLevel : CheckM Int :=
-  return (← get).segmentLevels.back!
+def currentStage : CheckM Int :=
+  return (← get).segmentStages.back!
 
 def binderIndex (deBruijnIndex : Nat) : CheckM Nat := do
   let numBinders := (← get).binders.size
@@ -54,13 +54,13 @@ def binderName (deBruijnIndex : Nat) : CheckM Name := do
   let index ← binderIndex deBruijnIndex
   return (← get).binders[index]!
 
-def binderLevel (deBruijnIndex : Nat) : CheckM Int := do
+def binderStage (deBruijnIndex : Nat) : CheckM Int := do
   let index ← binderIndex deBruijnIndex
-  let { segmentStarts, segmentLevels, segmentSizes, .. } ← get
+  let { segmentStarts, segmentStages, segmentSizes, .. } ← get
   for h : offset in *...segmentStarts.size do
     let i := segmentStarts.size - (offset + 1)
     if segmentStarts[i] ≤ index then
-      return segmentLevels[i]
+      return segmentStages[i]
   unreachable!
 
 inductive AppState
@@ -136,16 +136,16 @@ partial def checkStage (e : Expr) : CheckM Unit := do
       checkStage body
       popBinder
   | .bvar deBruijnIndex =>
-      let binderLevel ← binderLevel deBruijnIndex
-      let level ← currentLevel
-      unless binderLevel = level do
+      let binderStage ← binderStage deBruijnIndex
+      let stage ← currentStage
+      unless binderStage = stage do
         let name ← binderName deBruijnIndex
         reportStagingError m!"{name}"
   | .fvar fvarId =>
     unless stagedFVarId? == some fvarId do
-      let fvarLevel ← getFVarLevel fvarId
-      let level ← currentLevel
-      unless level = fvarLevel do
+      let fvarStage ← getFVarStage fvarId
+      let stage ← currentStage
+      unless stage = fvarStage do
         reportStagingError m!"{mkFVar fvarId}"
   | .mvar mvarId =>
       let some value ← getExprMVarAssignment? mvarId
@@ -165,9 +165,9 @@ partial def checkDen (e : Expr) : CheckM Unit := do
         | throwError "malformed denotational function"
       unless type.isConstOf ``Interp && den.isConstOf ``Interp.den do
         throwError "malformed denotational function"
-      let_expr Staged.interp staged := interp
+      let_expr Staged.interp instStaged := interp
         | throwError "malformed denotational function"
-      withReader ({ · with stagedFVarId? := staged.fvarId? }) do
+      withReader ({ · with stagedFVarId? := instStaged.fvarId? }) do
         pushBinder name
         checkStage body
         popBinder
@@ -175,7 +175,7 @@ partial def checkDen (e : Expr) : CheckM Unit := do
       checkStage e
 
 partial def checkApp (e : Expr) : CheckM AppState := do
-  let level ← currentLevel
+  let stage ← currentStage
   match e with
   | .app fn arg =>
       let state ← checkApp fn
@@ -183,13 +183,13 @@ partial def checkApp (e : Expr) : CheckM AppState := do
       | .regular | .den4 =>
           checkStage arg
       | .code1 | .mk1 | .mk2 =>
-          pushSegment (level + 1)
+          pushSegment (stage + 1)
           checkDen arg
           popSegment
       | .den1 =>
           checkDen arg
       | .den2 =>
-          pushSegment (level - 1)
+          pushSegment (stage - 1)
           checkStage arg
           popSegment
       | .code0 | .mk0 | .mk3 | .den0 | .den3 =>
@@ -213,13 +213,13 @@ partial def checkApp (e : Expr) : CheckM AppState := do
 end
 
 public def checkStages (e : Expr) (stagedFVarId? : Option FVarId := none)
-    (startLevel : Int := 0) : MetaM Unit :=
+    (startStage : Int := 0) : MetaM Unit :=
   (checkStage e)
     |>.run { stagedFVarId? }
     |>.run' {
       binders := #[]
       segmentStarts := #[0]
-      segmentLevels := #[startLevel]
+      segmentStages := #[startStage]
       segmentSizes := rfl
     }
 
