@@ -44,7 +44,7 @@ namespace ProveEq
 
 mutual
 
-variable (instStaged hGen : Expr)
+variable (interp hGen : Expr)
 
 /-- Returns a proof that a source expression equals its generative staging
 translation. -/
@@ -134,7 +134,7 @@ partial def proveHEq? (source target : Expr) (retryWhnf := true) : MetaM (Option
     if sourceTypeFn == ``Code && targetTypeFn == ``Code then
       return ← mkAppM ``Code.heq_of_gen #[hGen, source, target]
   | .forallE _ sourceDomain _ _, .forallE _ targetDomain _ _ =>
-    let eqDenType := mkEqDen instStaged
+    let eqDenType := mkEqDen interp
     if ← isDefEq sourceDomain eqDenType then
       if ← isDefEq targetDomain eqDenType then
         return ← mkAppM ``Code.den_heq_of_gen #[hGen, source, target]

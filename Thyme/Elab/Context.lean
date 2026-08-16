@@ -111,8 +111,10 @@ public def enterDenContext
     return (false, instStaged, stage, result)
   else
     let instStaged ← synthInstance (mkConst ``Staged)
+    let interp := mkStagedInterp instStaged
     let hDenName ← mkFreshUserName hDenName
-    withLocalDecl hDenName .default (mkEqDen instStaged) (kind := .implDetail) fun hDen => do
+    withLocalDecl hDenName .default (mkEqDen interp)
+        (kind := .implDetail) fun hDen => do
       let entry := mkEntry instStaged hDen
       let result ← withMarker (stage + 1) (someEntry entry) escaped <|
         k instStaged hDen
@@ -131,8 +133,9 @@ public def escapeDenContext
   else
     let instStagedName ← mkFreshUserName instStagedName
     let hDenName ← mkFreshUserName hDenName
-    withLocalDecl instStagedName .instImplicit (mkConst ``Staged) fun instStaged =>
-      withLocalDecl hDenName .default (mkEqDen instStaged)
+    withLocalDecl instStagedName .instImplicit (mkConst ``Staged) fun instStaged => do
+      let interp := mkStagedInterp instStaged
+      withLocalDecl hDenName .default (mkEqDen interp)
           (kind := .implDetail) fun hDen =>
         let entry := mkEntry instStaged hDen
         withMarker (stage - 1) noneEntry (mkConsEntry entry escaped) <|
