@@ -119,9 +119,31 @@ def dependentArg [Staged] (x : Code Nat) (h : Code (~x = 0)) :
 def dependentRootSplice [Staged] (n : Code Nat) : Code (Fin (~n + 1)) :=
   `⟨0⟩
 
-/-- info: 0 -/
-#guard_msgs in
+#guard_msgs(drop info) in
 #eval ~(dependentRootSplice `⟨1⟩)
+
+def universeConstrainedInternally.{u} [Staged] (α : Code (Type u)) : Code Nat :=
+  `⟨let _ : Type u := ~α; 0⟩
+
+#guard_msgs(drop info) in
+#eval ~(universeConstrainedInternally `⟨Unit⟩)
+
+def universeConstrainedBySpliceType.{u} [Staged] : Code ((α : Type u) → Type u) :=
+  `⟨fun α => α⟩
+
+example : (α : Type) → Type :=
+  ~(universeConstrainedBySpliceType.{0})
+
+def universeConstrainedBeforeInstantiation.{u} [Staged]
+    (α : Code (Type u)) (f : Code (Type u → Nat)) : Code Nat :=
+  `⟨
+    let _ := fun α : Type u => α
+    (~f) ~α
+  ⟩
+
+#guard_msgs(drop info) in
+#eval ~(universeConstrainedBeforeInstantiation.{0}
+  `⟨Unit⟩ `⟨fun _ : Type => 0⟩)
 
 /-- error: staging error: variable `x` is not available in the current staging context -/
 #guard_msgs in

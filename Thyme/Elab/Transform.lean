@@ -251,7 +251,12 @@ partial def transformSplice (dir : TypingDir) (expectedType? : dir.Input)
     let tree ← enterSpliceContext do
       transformSpliceTree u sourceBody
     let holeType := expectedType?.toOption.getD sourceType
-    let hole ← recordChild holeType.instantiate tree
+    let type := holeType.instantiate
+    let hole ← recordChild type tree
+    let hole := if type.hasLevelParam then
+      mkApp2 (mkConst ``id [u]) type hole
+    else
+      hole
     return .mk hole holeType
   | .code =>
     enterSpliceContext do
@@ -282,8 +287,10 @@ opaque evalCodegen (codegen : Expr) : MetaM Expr
 
 public def evaluateSplice (stage : Int) (instStaged splice : Expr) : TermElabM Expr := do
   checkStages splice instStaged.fvarId? (startStage := stage)
-  let_expr fn@Code.den' _ _ sourceBody _ := splice | throwInternalStagingError
+  let_expr fn@Code.den' _ sourceTypeDen sourceBody hDen := splice
+    | throwInternalStagingError
   let .const _ [u] := fn | unreachable!
+  let sourceType ← instantiateTypeDen sourceTypeDen hDen
   runTransform do
     let hGenName ← mkFreshUserName hGenName
     let interp := mkStagedInterp instStaged
@@ -295,7 +302,16 @@ public def evaluateSplice (stage : Int) (instStaged splice : Expr) : TermElabM E
         let codegen := mkApp2 (mkConst ``Codegen.mk) interp action
         let codegen := codegen.replaceFVars #[instStaged]
           #[mkStaged (mkConst ``Interp.gen)]
-        evalCodegen codegen
+        let result ← evalCodegen codegen
+        if result.hasLevelMVar then
+          check result
+          unless ← isDefEq (← inferType result) sourceType do
+            throwInternalStagingError
+        let result ← instantiateMVars result
+        if result.hasLevelMVar then
+          throwError m!"staged term contains unresolved universe levels{
+            indentExpr (← exposeLevelMVars result)}"
+        return result
 
 public def compileQuote (stage : Int) (interp hGen quote : Expr) : TermElabM Expr := do
   checkStages quote (startStage := stage)

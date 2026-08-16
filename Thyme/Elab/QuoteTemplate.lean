@@ -18,7 +18,11 @@ public def mkLambdaFreshFVars (names : Array Name)
   withLocalDeclsDND (names.map (·, .sort .zero)) fun fresh => do
     mkLambdaFVars fresh (← k fresh)
 
-initialize quoteTemplatesExt : MapDeclarationExtension (Array Expr) ←
+structure QuoteTemplate where
+  levelParams : Array Name
+  body : Expr
+
+initialize quoteTemplatesExt : MapDeclarationExtension (Array QuoteTemplate) ←
   mkMapDeclarationExtension (asyncMode := .local)
 
 public def instantiateQuoteTemplate (declName : Name) (templateIndex : Nat)
@@ -26,9 +30,11 @@ public def instantiateQuoteTemplate (declName : Name) (templateIndex : Nat)
   let env ← getEnv
   let some template := quoteTemplatesExt.find? env declName |>.bind (·[templateIndex]?)
     | throwError "quote #{templateIndex} for `{.ofConstName declName}` not found"
+  let levels ← template.levelParams.mapM fun _ => mkFreshLevelMVar
+  let body := template.body.instantiateLevelParamsArray template.levelParams levels
   let splices ← splices.mapM id
   let args := captures ++ splices
-  return template.instantiateBetaRevRange 0 args.size args
+  return body.instantiateBetaRevRange 0 args.size args
 
 /--
 Registers a quote template under the declaration being elaborated, and returns
@@ -38,10 +44,12 @@ type `Array Expr → Array (MetaM Expr) → MetaM Expr`.
 public def registerQuoteTemplate (template : Expr) : TermElabM Expr := do
   if template.hasMVar then
     throwError "internal staging error: quote template contains metavariables"
+  let levelParams := (collectLevelParams {} template).params
   let declName := (← getDeclName?).getD .anonymous
   let templates := quoteTemplatesExt.find? (← getEnv) declName |>.getD #[]
   let index := templates.size
-  modifyEnv fun env => quoteTemplatesExt.insert env declName (templates.push template)
+  modifyEnv fun env => quoteTemplatesExt.insert env declName
+    (templates.push { levelParams, body := template })
   return mkApp2 (mkConst ``instantiateQuoteTemplate) (toExpr declName) (toExpr index)
 
 end Thyme.Elab
