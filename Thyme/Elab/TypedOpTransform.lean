@@ -314,12 +314,10 @@ public partial def transform (dir : TypingDir) (expected : dir.Input) (e : Expr)
     coeResultM coerce expected e isTypeChanged do
       let decl ← fvarId.getDecl
       return decl.type
-  | .mvar mvarId =>
-    coeResultM coerce expected e false do
-      let decl ← mvarId.getDecl
-      return decl.type
   | .lit value =>
     coeResultM coerce expected e false (return value.type)
+  | .mvar _ =>
+    throwError "unexpected metavariable"
   | .bvar _ =>
     throwError "unexpected loose bound variable"
 
