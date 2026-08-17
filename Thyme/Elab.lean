@@ -50,6 +50,16 @@ def checkCoherence : Lean.Option Bool where
 def isDen (interp : Expr) : MetaM Bool :=
   withNewMCtxDepth <| isDefEq interp (mkConst ``Interp.den)
 
+def ensureSpliceInterp (code expectedInterp : Expr) : TermElabM Unit := do
+  let some (mkApp2 _ actualInterp _) ← whnfUntil (← inferType code) ``«Code»
+    | throwError "code expected"
+  unless ← isDefEq actualInterp expectedInterp do
+    if ← isDen actualInterp then
+      throwError "cannot splice denotational code; the declaration that produced it may be \
+        missing a `[Staged]` parameter"
+    else
+      throwError "cannot splice code from a different staging context"
+
 def ensureNoMVars (e : Expr) : TermElabM Unit := do
   if e.hasMVar then
     tryPostpone
@@ -210,9 +220,7 @@ def elabSplice : TermElab := fun stx expectedType? => do
       let codeType := mkCodeType u interp typeDen
       let code ← withoutErrToSorry <| withSynthesize do
         let code ← elabTerm codeStx (some codeType)
-        if let some (mkApp2 _ codeInterp _) ← whnfUntil (← inferType code) ``«Code» then
-          unless ← isDefEq codeInterp interp do
-            throwError "cannot splice code from a different staging context"
+        ensureSpliceInterp code interp
         ensureHasType (some codeType) code
       let code ← instantiateMVars code
       let typeDenBody ← instantiateMVars typeDenBody
