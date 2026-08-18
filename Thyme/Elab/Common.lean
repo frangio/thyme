@@ -1,6 +1,7 @@
 module
 
 public import Lean.Meta.Basic
+import Lean.Meta.WHNF
 import Thyme.Code
 
 open Lean Meta
@@ -44,6 +45,12 @@ def instantiateTypeDen (typeDen hDen : Expr) : MetaM Expr := do
 /-- `Code.{u} interp typeDen` -/
 def mkCodeType (u : Level) (interp typeDen : Expr) : Expr :=
   mkApp2 (.const ``Code [u]) interp typeDen
+
+def whnfCodeType? (type : Expr) : MetaM (Option (Level × Expr × Expr)) := do
+  let some type ← whnfUntil type ``«Code» | return none
+  let mkApp2 (.const _ [u]) interp typeDen := type
+    | throwError "malformed Code type"
+  return some (u, interp, typeDen)
 
 /-- `Code.mk interp typeDen den gen` -/
 def mkCode (u : Level) (interp typeDen den gen : Expr) : Expr :=

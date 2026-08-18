@@ -11,6 +11,9 @@ open Lean Elab Meta Term
 def addThymeScope (name : Name) : Name :=
   addMacroScope `_thyme name reservedMacroScope
 
+def addSplicedInstanceScope (name : Name) : Name :=
+  addMacroScope `_thyme.splicedInstance name reservedMacroScope
+
 def contextMarkerName : Name :=
   addThymeScope `contextMarker
 
@@ -34,13 +37,18 @@ public def rawIntLit? : Expr → Option Int
 structure ContextEntry where
   instStaged : Staged
   hDen : instStaged.interp = .den
+  instancesHandle : Unit
 
-def mkEntry (instStaged hDen : Expr) : Expr :=
-  mkApp2 (.const ``ContextEntry.mk []) instStaged hDen
+def mkEntry (instStaged hDen : Expr) : MetaM Expr := do
+  let instancesHandle ← mkFreshExprMVar (some (mkConst ``Unit)) .syntheticOpaque
+  return mkApp3 (.const ``ContextEntry.mk []) instStaged hDen instancesHandle
 
-def viewEntry (entry : Expr) : MetaM (Expr × Expr) := do
-  let_expr ContextEntry.mk instStaged hDen := entry | throwMalformedContext
-  return (instStaged, hDen)
+def viewEntry (entry : Expr) : MetaM (Expr × Expr × LocalInstances) := do
+  let_expr ContextEntry.mk instStaged hDen instancesHandle := entry
+    | throwMalformedContext
+  let .mvar mvarId := instancesHandle | throwMalformedContext
+  let { localInstances, .. } ← mvarId.getDecl
+  return (instStaged, hDen, localInstances)
 
 def nilEntry : Expr :=
   .app (.const ``List.nil [.zero]) (.const ``ContextEntry [])
@@ -70,21 +78,22 @@ structure ContextZipper where
 def mkZipper (stage entered escaped : Expr) : Expr :=
   mkApp3 (.const ``ContextZipper.mk []) stage entered escaped
 
-def contextMarkerValue? : Option LocalDecl → Option Expr
-  | some (.ldecl _ _ _ type value _ _) =>
-    if type.isConstOf ``ContextZipper then some value else none
+def contextMarkerValue? : Option LocalDecl → Option (Nat × Expr)
+  | some (.ldecl index _ _ type value _ _) =>
+    if type.isConstOf ``ContextZipper then some (index, value) else none
   | _ => none
 
-def getAmbient : TermElabM (Int × Option Expr × Expr) := do
+def getAmbient : TermElabM (Int × Option Expr × Expr × Nat) := do
   let marker? ← (← getLCtx).decls.findSomeRevM? fun decl? =>
     return contextMarkerValue? decl?
-  let some zipper := marker?
-    | return (0, none, nilEntry)
+  let some (markerIndex, zipper) := marker?
+    | return (0, none, nilEntry, 0)
+  let lctxStart := markerIndex + 1
   let_expr ContextZipper.mk stage entered? escaped := zipper | throwMalformedContext
   let some stage := rawIntLit? stage | throwMalformedContext
   match_expr entered? with
-  | Option.none _ => return (stage, none, escaped)
-  | Option.some _ entry => return (stage, some entry, escaped)
+  | Option.none _ => return (stage, none, escaped, lctxStart)
+  | Option.some _ entry => return (stage, some entry, escaped, lctxStart)
   | _ => throwMalformedContext
 
 def withMarker (stage : Int) (entered escaped : Expr) (k : TermElabM α) :
@@ -96,18 +105,55 @@ def withMarker (stage : Int) (entered escaped : Expr) (k : TermElabM α) :
     (kind := .implDetail)
     fun _ => k
 
+def withLetDecls (decls : Array (Expr × Name × Expr))
+    (k : Array Expr → TermElabM α) : TermElabM α :=
+  go (.emptyWithCapacity decls.size)
+where
+  go (fvars : Array Expr) : TermElabM α := do
+    if h : fvars.size < decls.size then
+      let (value, name, type) := decls[fvars.size]
+      withLetDecl name type value fun fvar =>
+        go (fvars.push fvar)
+    else
+      k fvars
+
+def withSplicedInstances
+    (lctxStart : Nat) (interp hDen : Expr)
+    (k : (Expr → MetaM Expr) → TermElabM α) : TermElabM α := do
+  let mut foundInstances := #[]
+  let lctx ← getLCtx
+  for h : i in lctxStart...lctx.decls.size do
+    let some decl := lctx.decls[i] | continue
+    if decl.isImplementationDetail then continue
+    let some (u, codeInterp, typeDen) ← whnfCodeType? decl.type
+      | continue
+    unless ← isDefEq codeInterp interp do continue
+    let type ← instantiateTypeDen typeDen hDen
+    unless (← Meta.isClass? type).isSome do continue
+    let name := addSplicedInstanceScope decl.userName
+    let value := mkCodeDen u codeInterp typeDen decl.toExpr hDen
+    foundInstances := foundInstances.push (value, name, type)
+  withLetDecls foundInstances fun fvars =>
+    let values := foundInstances.map fun (value, _) => value
+    k fun e => e.replaceFVarsM fvars values
+
 /-- Enter a denotational context, returning whether it is newly owned, its
 staged instance, and the stage of the operator that entered it. -/
 public def enterDenContext
-    (k : (instStaged hDen : Expr) → TermElabM α) :
+    (k : (instStaged hDen : Expr) →
+      (inlineInstances : Expr → MetaM Expr) → TermElabM α) :
     TermElabM (Bool × Expr × Int × α) := do
-  let (stage, entered?, escaped) ← getAmbient
+  let (stage, entered?, escaped, lctxStart) ← getAmbient
   if entered?.isSome then
     throwMultiLevelStagingError
   if let some (entry, escaped) ← listPop? escaped then
-    let (instStaged, hDen) ← viewEntry entry
-    let result ← withMarker (stage + 1) (someEntry entry) escaped <|
-      k instStaged hDen
+    let (instStaged, hDen, localInstances) ← viewEntry entry
+    let interp := mkStagedInterp instStaged
+    let entry ← mkEntry instStaged hDen
+    let result ← withTheReader Meta.Context ({ · with localInstances }) <|
+      withSplicedInstances lctxStart interp hDen fun inlineInstances =>
+        withMarker (stage + 1) (someEntry entry) escaped <|
+          k instStaged hDen inlineInstances
     return (false, instStaged, stage, result)
   else
     let instStaged ← synthInstance (mkConst ``Staged)
@@ -115,29 +161,33 @@ public def enterDenContext
     let hDenName ← mkFreshUserName hDenName
     withLocalDecl hDenName .default (mkEqDen interp)
         (kind := .implDetail) fun hDen => do
-      let entry := mkEntry instStaged hDen
-      let result ← withMarker (stage + 1) (someEntry entry) escaped <|
-        k instStaged hDen
-      return (true, instStaged, stage, result)
+      let entry ← mkEntry instStaged hDen
+      withTheReader Meta.Context ({ · with localInstances := #[] }) <|
+        withSplicedInstances lctxStart interp hDen fun inlineInstances => do
+          let result ← withMarker (stage + 1) (someEntry entry) escaped <|
+            k instStaged hDen inlineInstances
+          return (true, instStaged, stage, result)
 
 /-- Escape the current denotational context, invoking `k` with whether this is
 a root escape and the stage of the splice operator. -/
 public def escapeDenContext
     (k : (isRoot : Bool) → (stage : Int) → (instStaged hDen : Expr) → TermElabM α) :
     TermElabM α := do
-  let (stage, entered?, escaped) ← getAmbient
+  let (stage, entered?, escaped, _) ← getAmbient
   if let some entry := entered? then
-    let (instStaged, hDen) ← viewEntry entry
-    withMarker (stage - 1) noneEntry (mkConsEntry entry escaped) <|
-      k false stage instStaged hDen
+    let (instStaged, hDen, localInstances) ← viewEntry entry
+    let entry ← mkEntry instStaged hDen
+    withTheReader Meta.Context ({ · with localInstances }) <|
+      withMarker (stage - 1) noneEntry (mkConsEntry entry escaped) <|
+        k false stage instStaged hDen
   else
     let instStagedName ← mkFreshUserName instStagedName
     let hDenName ← mkFreshUserName hDenName
     withLocalDecl instStagedName .instImplicit (mkConst ``Staged) fun instStaged => do
       let interp := mkStagedInterp instStaged
       withLocalDecl hDenName .default (mkEqDen interp)
-          (kind := .implDetail) fun hDen =>
-        let entry := mkEntry instStaged hDen
+          (kind := .implDetail) fun hDen => do
+        let entry ← mkEntry instStaged hDen
         withMarker (stage - 1) noneEntry (mkConsEntry entry escaped) <|
           k true stage instStaged hDen
 
@@ -148,7 +198,7 @@ public def getFVarStage (fvarId : FVarId) : MetaM Int := do
   if h : decl.index < lctx.decls.size then
     for offset in *...decl.index do
       let i := decl.index - (offset + 1)
-      let some value := contextMarkerValue? lctx.decls[i] | continue
+      let some (_, value) := contextMarkerValue? lctx.decls[i] | continue
       let_expr ContextZipper.mk stage _ _ := value | throwMalformedContext
       let some stage := rawIntLit? stage | throwMalformedContext
       return stage

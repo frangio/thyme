@@ -261,3 +261,26 @@ Note: This linter can be disabled with `set_option linter.thyme.codeTransport fa
 def transportInsideQuote [Staged] {α β : Code Type} (h : α = β)
     (x : Code ~α) : Code ~β :=
   `⟨~(h ▸ x)⟩
+
+def defaultCode [Staged] (α : Code (Type u)) (iα : Code (Inhabited ~α)) : Code ~α :=
+  `⟨default⟩
+
+def swapInstances {α β : Type} [LE α] (inst : Code (LE β)) : Code Unit :=
+  `⟨by
+    have _ : LE β := inferInstance
+    fail_if_success
+      have _ : LE α := inferInstance
+    exact ~(by
+      have _ : LE α := inferInstance
+      fail_if_success
+        have _ : LE β := inferInstance
+      exact `⟨()⟩)⟩
+
+def spliceInstanceOnReentry {α β : Type} [LE α]
+    (makeInst : Unit → Code (LE β)) : Code Unit :=
+  `⟨~(let inst := makeInst ()
+      `⟨by
+        have _ : LE β := inferInstance
+        fail_if_success
+          have _ : LE α := inferInstance
+        exact ()⟩)⟩

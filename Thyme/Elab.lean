@@ -51,7 +51,7 @@ def isDen (interp : Expr) : MetaM Bool :=
   withNewMCtxDepth <| isDefEq interp (mkConst ``Interp.den)
 
 def ensureSpliceInterp (code expectedInterp : Expr) : TermElabM Unit := do
-  let some (mkApp2 _ actualInterp _) ← whnfUntil (← inferType code) ``«Code»
+  let some (_, actualInterp, _) ← whnfCodeType? (← inferType code)
     | throwError "code expected"
   unless ← isDefEq actualInterp expectedInterp do
     if ← isDen actualInterp then
@@ -78,8 +78,10 @@ def ensureNoMVars (e : Expr) : TermElabM Unit := do
     throwMVarError msg
 
 /-- Elaborate `stx` under `hDen` and abstract it as a denotational component. -/
-def elabDen (hDen : Expr) (stx : Syntax) (expectedType : Expr) : TermElabM Expr := do
+def elabDen (hDen : Expr) (inlineInstances : Expr → MetaM Expr)
+    (stx : Syntax) (expectedType : Expr) : TermElabM Expr := do
   let body ← elabTermEnsuringType stx (some expectedType)
+  let body ← inlineInstances body
   mkLambdaFVars #[hDen] body
 
 /-- Create a tactic metavariable whose finalizer runs once its target no longer
@@ -166,8 +168,8 @@ def elabCode : TermElab := fun stx expectedType? => do
   if let some expectedType := expectedType? then
     discard <| isDefEq expectedType (.sort (.max .one u))
   let (ownsContext, instStaged, stage, typeDen) ←
-    enterDenContext fun _ hDen =>
-      elabDen hDen typeStx (.sort u)
+    enterDenContext fun _ hDen inlineInstances =>
+      elabDen hDen inlineInstances typeStx (.sort u)
   let interp := mkStagedInterp instStaged
   if ownsContext then
     unless ← isDen interp do
@@ -183,13 +185,13 @@ def elabQuote : TermElab := fun stx expectedType? => do
   let u ← mkFreshLevelMVar
   let codeInterp ← mkFreshExprMVar (some (mkConst ``Interp))
   let (ownsContext, instStaged, stage, typeDen, den) ←
-    enterDenContext fun contextInstStaged hDen => do
+    enterDenContext fun contextInstStaged hDen inlineInstances => do
       discard <| isDefEq codeInterp (mkStagedInterp contextInstStaged)
       let typeDenBody ← mkFreshExprMVar (some (.sort u))
       let typeDen ← mkLambdaFVars #[hDen] typeDenBody
       let codeType := mkCodeType u codeInterp typeDen
       discard <| isDefEq expectedType codeType
-      let den ← elabDen hDen bodyStx typeDenBody
+      let den ← elabDen hDen inlineInstances bodyStx typeDenBody
       return (typeDen, den)
   let interp := mkStagedInterp instStaged
   let gen ← mkGen u stage interp typeDen den ownsContext
