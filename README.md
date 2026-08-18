@@ -16,6 +16,16 @@ import Thyme
 open Thyme.Prelude
 ```
 
+## Core concepts
+
+`Code α` is the type of metaprograms that generate terms of type `α`.
+
+If `e : α`, the quotation `` `⟨e⟩ : Code α `` constructs a metaprogram that generates the term `e`, with any splices in `e` evaluated as described next.
+
+If `c : Code α`, the splice `~c : α` runs `c`'s code generator and inserts the result in its place. Inside a quotation, the splice is evaluated as part of that quotation's code generator. Outside a quotation, it is evaluated immediately during elaboration.
+
+Declarations that produce metaprograms or metaprogram types must have an instance parameter `[Staged]` if they are meant to be used for code generation. The parameter may be omitted if the declaration is used for reasoning only.
+
 ## Examples
 
 We can implement exponentiation as a staged function of a statically known exponent:
