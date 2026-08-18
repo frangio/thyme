@@ -243,10 +243,6 @@ def elabSplice : TermElab := fun stx expectedType? => do
 @[app_delab «Code»]
 def delabCode : Delab :=
     whenNotPPOption getPPExplicit <| whenPPOption getPPNotation <| withOverApp 2 do
-  let interp ← withNaryArg 0 getExpr
-  withNewMCtxDepth do
-    let .some instStaged ← trySynthInstance (mkConst ``Staged) | failure
-    unless ← isDefEq interp (mkStagedInterp instStaged) do failure
   let type ← withNaryArg 1 do
     let .lam name _ _ _ ← getExpr | failure
     withBindingBody name delab
