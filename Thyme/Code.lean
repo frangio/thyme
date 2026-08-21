@@ -79,13 +79,13 @@ unif_hint [s : Staged] (h : s.Den) (α : Sort u)
 
 namespace Code
 
-def ofGen [s : Staged] (α : s.Den → Sort u)
+def ofGen {s : Staged} (α : s.Den → Sort u)
     (gen : Codegen)
     (hGen : s.Gen) : Code α :=
   { gen, den' hDen := nomatch hGen, hDen }
 
 @[ext]
-theorem ext' [s : Staged] {α : s.Den → Sort u} {a b : Code α} :
+theorem ext' {s : Staged} {α : s.Den → Sort u} {a b : Code α} :
     a.den' = b.den' → a = b := by
   intro h
   cases a
@@ -94,7 +94,7 @@ theorem ext' [s : Staged] {α : s.Den → Sort u} {a b : Code α} :
   apply Subsingleton.elim
 
 @[ext]
-theorem funext' [s : Staged]
+theorem funext' {s : Staged}
     {α : s.Den → Sort u} {β : Code α → Sort v}
     {f g : (a : Code α) → β a} :
     (∀ a, f ⟨a, .stub⟩ = g ⟨a, .stub⟩) → f = g := by
@@ -127,7 +127,7 @@ theorem funext
 
 end
 
-theorem den_heq_of_gen [s : Staged]
+theorem den_heq_of_gen {s : Staged}
     {α β : s.Den → Sort u}
     (hGen : s.Gen)
     (a : (hDen : s.Den) → α hDen)
@@ -140,7 +140,7 @@ theorem den_heq_of_gen [s : Staged]
   funext hDen
   nomatch hGen, hDen
 
-theorem heq_of_gen [s : Staged]
+theorem heq_of_gen {s : Staged}
     {α₁ α₂ : s.Den → Sort u}
     (h : s.Gen)
     (a₁ : Code α₁) (a₂ : Code α₂) : a₁ ≍ a₂ := by
