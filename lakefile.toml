@@ -1,5 +1,5 @@
 name = "thyme"
-version = "0.1.0"
+version = "0.2.0"
 description = "Typed metaprogramming based on staging, with support for dependent types and reasoning about metaprograms."
 license = "Apache-2.0"
 defaultTargets = ["Thyme"]

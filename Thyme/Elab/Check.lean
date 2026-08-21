@@ -161,11 +161,7 @@ implementation-detail equality domain. -/
 partial def checkDen (e : Expr) : CheckM Unit := do
   match e.consumeMData with
   | .lam name domain body _ =>
-      let_expr Eq type interp den := domain
-        | throwError "malformed denotational function"
-      unless type.isConstOf ``Interp && den.isConstOf ``Interp.den do
-        throwError "malformed denotational function"
-      let_expr Staged.interp instStaged := interp
+      let_expr Staged.Den instStaged := domain
         | throwError "malformed denotational function"
       withReader ({ · with stagedFVarId? := instStaged.fvarId? }) do
         pushBinder name
