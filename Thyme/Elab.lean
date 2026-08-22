@@ -243,8 +243,14 @@ def elabSplice : TermElab := fun stx expectedType? => do
 def delabCode : Delab :=
     whenNotPPOption getPPExplicit <| whenPPOption getPPNotation <| withOverApp 2 do
   let type ← withNaryArg 1 do
-    let .lam name _ _ _ ← getExpr | failure
-    withBindingBody name delab
+    let typeDen ← getExpr
+    if let .lam name _ _ _ := typeDen then
+      withBindingBody name delab
+    else
+      let .forallE name domain _ bi ← whnf (← inferType typeDen) | failure
+      let typeDen := .lam name domain (.app (typeDen.liftLooseBVars 0 1) (.bvar 0)) bi
+      withTheReader SubExpr (fun ctx => { ctx with expr := typeDen }) do
+        withBindingBody name delab
   `(Code $type)
 
 @[app_delab Code.mk]
