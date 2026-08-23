@@ -284,3 +284,10 @@ def spliceInstanceOnReentry {α β : Type} [LE α]
         fail_if_success
           have _ : LE α := inferInstance
         exact ()⟩)⟩
+
+-- Unnecessarily deferred quotation actions can interfere with dependent
+-- pattern elaboration.
+axiom dependentPatternResult [Staged] (type : Code Type) : Code ~type × Unit
+noncomputable example [Staged] : Unit :=
+  let (_, b) := dependentPatternResult `⟨Unit⟩
+  b

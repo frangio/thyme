@@ -84,22 +84,26 @@ def elabDen (hDen : Expr) (inlineInstances : Expr → MetaM Expr)
   let body ← inlineInstances body
   mkLambdaFVars #[hDen] body
 
-/-- Create a tactic metavariable whose finalizer runs once its target no longer
-contains expression metavariables. -/
+/-- Finalize immediately when possible, or create a tactic metavariable that
+runs the finalizer once its target no longer contains expression metavariables. -/
 def mkPendingTacticMVar
     (type : Expr)
-    (finalize : Expr → TermElabM Expr) : TermElabM Expr :=
-  elabToSyntax
-    (fun expectedType? => do
-      let some expectedType := expectedType?
-        | throwError "missing pending finalization target"
-      finalize expectedType)
-    (fun term => do
-      let goal ← mkFreshExprMVar (some type) .syntheticOpaque
-      let tacticCode ← `(by exact $term)
-      registerSyntheticMVarWithCurrRef goal.mvarId! <|
-        .tactic tacticCode (← saveContext) .term (delayOnMVars := true)
-      return goal)
+    (finalize : Expr → TermElabM Expr) : TermElabM Expr := do
+  let type ← instantiateMVars type
+  if !type.hasMVar then
+    finalize type
+  else
+    elabToSyntax
+      (fun expectedType? => do
+        let some expectedType := expectedType?
+          | throwError "missing pending finalization target"
+        finalize expectedType)
+      (fun term => do
+        let goal ← mkFreshExprMVar (some type) .syntheticOpaque
+        let tacticCode ← `(by exact $term)
+        registerSyntheticMVarWithCurrRef goal.mvarId! <|
+          .tactic tacticCode (← saveContext) .term (delayOnMVars := true)
+        return goal)
 
 /-- `PendingCodeCheck.{u} stage instStaged typeDen` -/
 @[match_pattern]
