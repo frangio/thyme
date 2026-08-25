@@ -1,6 +1,7 @@
 module
 
 import Thyme
+import ThymeTests.Examples.HMonad
 import ThymeTests.Examples.FoldrFusion
 meta import ThymeTests.Guard
 meta import ThymeTests.Imported
