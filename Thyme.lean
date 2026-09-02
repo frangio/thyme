@@ -1,6 +1,7 @@
 module
 
 public import Thyme.Code
+public import Thyme.GenT
 public import Thyme.Syntax
 public import Thyme.Elab
 
