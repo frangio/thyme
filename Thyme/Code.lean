@@ -66,7 +66,7 @@ theorem eq_stub {s : Staged} (gen : Codegen) : gen = stub := by
 
 end Codegen
 
-structure Code [s : Staged] (α : s.Den → Sort u) where
+structure Code [s : Staged] (α : s.Den → Sort u) : Type u where
   den' : (h : s.Den) → α h
   gen : Codegen := .stub
 

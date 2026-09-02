@@ -171,7 +171,7 @@ def elabCode : TermElab := fun stx expectedType? => do
   let `(Code $typeStx) := stx | throwUnsupportedSyntax
   let u ← mkFreshLevelMVar
   if let some expectedType := expectedType? then
-    discard <| isDefEq expectedType (.sort (.max .one u))
+    discard <| isDefEq expectedType (.sort u.succ)
   let (ownsContext, instStaged, stage, typeDen) ←
     enterDenContext fun _ hDen inlineInstances =>
       elabDen hDen inlineInstances typeStx (.sort u)
