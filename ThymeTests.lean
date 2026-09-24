@@ -284,3 +284,32 @@ def spliceInstanceOnReentry {α β : Type} [LE α]
         fail_if_success
           have _ : LE α := inferInstance
         exact ()⟩)⟩
+
+def npowCode [Staged] {α : Code Type} (iMul : Code (Mul ~α))
+    (iOne : Code (OfNat ~α (nat_lit 1))) (x : Code ~α) : Nat → Code ~α
+  | 0 => `⟨1⟩
+  | n + 1 => `⟨~(npowCode iMul iOne x n) * ~x⟩
+
+#guard_staged fun (x : Int) => ~(npowCode `⟨Int.instMul⟩ `⟨instOfNat⟩ `⟨x⟩ 3) =ₛ
+  fun (x : Int) => 1 * x * x * x
+
+/-- Exercises well-founded recursion in a staged function. `@[semireducible]` is
+needed for the coherence check, which compares the generated code to its
+denotation at default transparency. -/
+@[semireducible]
+def zpowRecCode [Staged] {α : Code Type} (iMul : Code (Mul ~α))
+    (iOne : Code (OfNat ~α (nat_lit 1))) (iDiv : Code (Div ~α)) (x : Code ~α) (n : Int) :
+    Code ~α :=
+  if n = 0 then `⟨1⟩
+  else if 0 < n then `⟨~(zpowRecCode iMul iOne iDiv x (n - 1)) * ~x⟩
+  else `⟨~(zpowRecCode iMul iOne iDiv x (n + 1)) / ~x⟩
+termination_by n.natAbs
+decreasing_by all_goals omega
+
+#guard_staged fun (x : Int) =>
+    ~(zpowRecCode `⟨Int.instMul⟩ `⟨instOfNat⟩ `⟨Int.instDiv⟩ `⟨x⟩ 2) =ₛ
+  fun (x : Int) => 1 * x * x
+
+#guard_staged fun (x : Int) =>
+    ~(zpowRecCode `⟨Int.instMul⟩ `⟨instOfNat⟩ `⟨Int.instDiv⟩ `⟨x⟩ (-2)) =ₛ
+  fun (x : Int) => 1 / x / x
