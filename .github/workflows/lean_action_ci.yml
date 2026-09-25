@@ -15,4 +15,4 @@ jobs:
         with:
           test: true
           build-args: "--wfail"
-          check-reservoir-eligibility: false
+          check-reservoir-eligibility: true

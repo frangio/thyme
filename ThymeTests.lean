@@ -285,6 +285,13 @@ def spliceInstanceOnReentry {α β : Type} [LE α]
           have _ : LE α := inferInstance
         exact ()⟩)⟩
 
+-- Unnecessarily deferred quotation actions can interfere with dependent
+-- pattern elaboration.
+axiom dependentPatternResult [Staged] (type : Code Type) : Code ~type × Unit
+noncomputable example [Staged] : Unit :=
+  let (_, b) := dependentPatternResult `⟨Unit⟩
+  b
+
 def npowCode [Staged] {α : Code Type} (iMul : Code (Mul ~α))
     (iOne : Code (OfNat ~α (nat_lit 1))) (x : Code ~α) : Nat → Code ~α
   | 0 => `⟨1⟩

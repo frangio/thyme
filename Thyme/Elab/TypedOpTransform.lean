@@ -381,7 +381,7 @@ partial def transformLambdaLet (dir : TypingDir) (expected : dir.Input)
     (e : Expr) (fvars : Array Expr) (changeRange : ChangeRange) : m (dir.Result Expr) := do
   match e with
   | .lam name sourceDomain body bi =>
-    match dir with
+    match (dependent := true) dir with
     | .check =>
       expected.withForall! fun domain bodyType =>
         mapUnderBinders (dir := .check) sourceDomain fvars changeRange
@@ -414,7 +414,7 @@ partial def transformLambdaLet (dir : TypingDir) (expected : dir.Input)
     mapUnderBinders body fvars changeRange
       (transform dir expected)
       fun body bodyAbs _ => do
-        match dir with
+        match (dependent := true) dir with
         | .check =>
           return bodyAbs
         | .synth =>

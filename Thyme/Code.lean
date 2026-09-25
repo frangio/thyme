@@ -8,61 +8,70 @@ namespace Thyme
 
 public section
 
-inductive Interp where
-  | den
-  | gen
-  deriving DecidableEq
+class Staged where
+  private mk ::
+  Den : Prop
 
-def Codegen (i : Interp) := Squash (i = .gen → MetaM Expr)
+namespace Staged
+
+def Gen [s : Staged] : Prop := ¬s.Den
+
+@[instance_reducible, instance low]
+def den : Staged := ⟨True⟩
+
+@[instance_reducible]
+def gen : Staged := ⟨False⟩
+
+theorem Den.intro : den.Den := True.intro
+
+theorem Gen.intro : gen.Gen := False.elim
+
+end Staged
+
+-- Disable instance locally to avoid accidental use.
+attribute [-instance] Staged.den
+
+def Codegen [s : Staged] := Squash (s.Gen → MetaM Expr)
 
 namespace Codegen
 
-variable {i : Interp}
-
-instance : Subsingleton (Codegen i) :=
+instance {s : Staged} : Subsingleton Codegen :=
   inferInstanceAs (Subsingleton (Squash _))
 
-opaque stub : Codegen i :=
+opaque stub [s : Staged] : Codegen :=
   .mk fun _ => throwError "missing code generator"
 
-private def mkImpl (action : i = .gen → MetaM Expr) : Codegen i :=
+private def mkImpl [s : Staged] (action : s.Gen → MetaM Expr) : Codegen :=
   .mk action
 
 @[implemented_by mkImpl]
-abbrev mk (action : i = .gen → MetaM Expr) : Codegen i :=
+abbrev mk [s : Staged] (action : s.Gen → MetaM Expr) : Codegen :=
   stub
 
 @[noinline] -- https://github.com/leanprover/lean4/issues/14719
-private unsafe def runImpl : Codegen i → i = .gen → MetaM Expr :=
-  let α := i = .gen → MetaM Expr
+private unsafe def runImpl {s : Staged} : Codegen → s.Gen → MetaM Expr :=
+  let α := s.Gen → MetaM Expr
   @unsafeCast (Squash α) α
 
 @[implemented_by runImpl]
-opaque run : Codegen i → i = .gen → MetaM Expr
+opaque run {s : Staged} : Codegen → s.Gen → MetaM Expr
 
 @[simp↓]
-theorem mk_eq_stub (action : i = .gen → MetaM Expr) :
+theorem mk_eq_stub {s : Staged} (action : s.Gen → MetaM Expr) :
     mk action = stub :=
   rfl
 
-theorem eq_stub (gen : Codegen i) : gen = stub := by
+theorem eq_stub {s : Staged} (gen : Codegen) : gen = stub := by
   apply Subsingleton.elim
 
 end Codegen
 
-class Staged where
-  interp : Interp
+structure Code [s : Staged] (α : s.Den → Sort u) where
+  den' : (h : s.Den) → α h
+  gen : Codegen := .stub
 
-instance (priority := low) Staged.den : Staged := ⟨.den⟩
-
-attribute [-instance] Staged.den
-
-structure Code (i : Interp) (α : i = .den → Sort u) where
-  den' : (h : i = .den) → α h
-  gen : Codegen i := .stub
-
-unif_hint (i : Interp) (h : i = .den) (α : Sort u)
-    (code : Code i (fun _ => α))
+unif_hint [s : Staged] (h : s.Den) (α : Sort u)
+    (code : Code (fun _ => α))
     (a den : α) where
   code ≟ .mk (fun _ => den) .stub
   den ≟ a
@@ -70,13 +79,13 @@ unif_hint (i : Interp) (h : i = .den) (α : Sort u)
 
 namespace Code
 
-def ofGen {i : Interp} (α : i = .den → Sort u)
-    (gen : Codegen i)
-    (hGen : i = .gen) : Code i α :=
-  { gen, den' hDen := nomatch hDen ▸ hGen }
+def ofGen {s : Staged} (α : s.Den → Sort u)
+    (gen : Codegen)
+    (hGen : s.Gen) : Code α :=
+  { gen, den' hDen := nomatch hGen, hDen }
 
 @[ext]
-theorem ext' {i : Interp} {α : i = .den → Sort u} {a b : Code i α} :
+theorem ext' {s : Staged} {α : s.Den → Sort u} {a b : Code α} :
     a.den' = b.den' → a = b := by
   intro h
   cases a
@@ -85,9 +94,9 @@ theorem ext' {i : Interp} {α : i = .den → Sort u} {a b : Code i α} :
   apply Subsingleton.elim
 
 @[ext]
-theorem funext' {i : Interp}
-    {α : i = .den → Sort u} {β : Code i α → Sort v}
-    {f g : (a : Code i α) → β a} :
+theorem funext' {s : Staged}
+    {α : s.Den → Sort u} {β : Code α → Sort v}
+    {f g : (a : Code α) → β a} :
     (∀ a, f ⟨a, .stub⟩ = g ⟨a, .stub⟩) → f = g := by
   intro h
   funext ⟨a, gen⟩
@@ -95,10 +104,13 @@ theorem funext' {i : Interp}
 
 section
 
-abbrev den (self : Code .den α) : α rfl := self.den' rfl
+attribute [local instance] Staged.den
+
+abbrev den (self : Code α) : α .intro :=
+  self.den' .intro
 
 @[ext default + 1]
-theorem ext {a b : Code .den α} : a.den = b.den → a = b := by
+theorem ext {a b : Code α} : a.den = b.den → a = b := by
   intro h
   ext
   exact h
@@ -106,20 +118,20 @@ theorem ext {a b : Code .den α} : a.den = b.den → a = b := by
 @[ext default + 1]
 theorem funext
     {α : Sort u}
-    {β : Code .den (fun _ => α) → Sort v}
-    {f g : (a : Code .den (fun _ => α)) → β a} :
+    {β : Code (fun _ => α) → Sort v}
+    {f g : (a : Code (fun _ => α)) → β a} :
     (∀ (a : α), f ⟨fun _ => a, .stub⟩ = g ⟨fun _ => a, .stub⟩) → f = g := by
   intro h
   funext ⟨a, gen⟩
-  rw [Codegen.eq_stub gen, h (a rfl)]
+  rw [Codegen.eq_stub gen, h (a .intro)]
 
 end
 
-theorem den_heq_of_gen {i : Interp}
-    {α β : i = .den → Sort u}
-    (hGen : i = .gen)
-    (a : (hDen : i = .den) → α hDen)
-    (b : (hDen : i = .den) → β hDen) : a ≍ b := by
+theorem den_heq_of_gen {s : Staged}
+    {α β : s.Den → Sort u}
+    (hGen : s.Gen)
+    (a : (hDen : s.Den) → α hDen)
+    (b : (hDen : s.Den) → β hDen) : a ≍ b := by
   have : α = β := by
     funext hDen
     nomatch hGen, hDen
@@ -128,10 +140,10 @@ theorem den_heq_of_gen {i : Interp}
   funext hDen
   nomatch hGen, hDen
 
-theorem heq_of_gen {i : Interp}
-    {α₁ α₂ : i = .den → Sort u}
-    (h : i = .gen)
-    (a₁ : Code i α₁) (a₂ : Code i α₂) : a₁ ≍ a₂ := by
+theorem heq_of_gen {s : Staged}
+    {α₁ α₂ : s.Den → Sort u}
+    (h : s.Gen)
+    (a₁ : Code α₁) (a₂ : Code α₂) : a₁ ≍ a₂ := by
   have : α₁ = α₂ := eq_of_heq (den_heq_of_gen h α₁ α₂)
   subst α₂
   apply heq_of_eq

@@ -36,7 +36,7 @@ public def rawIntLit? : Expr → Option Int
 
 structure ContextEntry where
   instStaged : Staged
-  hDen : instStaged.interp = .den
+  hDen : instStaged.Den
   instancesHandle : Unit
 
 def mkEntry (instStaged hDen : Expr) : MetaM Expr := do
@@ -118,20 +118,20 @@ where
       k fvars
 
 def withSplicedInstances
-    (lctxStart : Nat) (interp hDen : Expr)
+    (lctxStart : Nat) (instStaged hDen : Expr)
     (k : (Expr → MetaM Expr) → TermElabM α) : TermElabM α := do
   let mut foundInstances := #[]
   let lctx ← getLCtx
   for h : i in lctxStart...lctx.decls.size do
     let some decl := lctx.decls[i] | continue
     if decl.isImplementationDetail then continue
-    let some (u, codeInterp, typeDen) ← whnfCodeType? decl.type
+    let some (u, codeInstStaged, typeDen) ← whnfCodeType? decl.type
       | continue
-    unless ← isDefEq codeInterp interp do continue
+    unless ← isDefEq codeInstStaged instStaged do continue
     let type ← instantiateTypeDen typeDen hDen
     unless (← Meta.isClass? type).isSome do continue
     let name := addSplicedInstanceScope decl.userName
-    let value := mkCodeDen u codeInterp typeDen decl.toExpr hDen
+    let value := mkCodeDen u codeInstStaged typeDen decl.toExpr hDen
     foundInstances := foundInstances.push (value, name, type)
   withLetDecls foundInstances fun fvars =>
     let values := foundInstances.map fun (value, _) => value
@@ -148,22 +148,21 @@ public def enterDenContext
     throwMultiLevelStagingError
   if let some (entry, escaped) ← listPop? escaped then
     let (instStaged, hDen, localInstances) ← viewEntry entry
-    let interp := mkStagedInterp instStaged
     let entry ← mkEntry instStaged hDen
     let result ← withTheReader Meta.Context ({ · with localInstances }) <|
-      withSplicedInstances lctxStart interp hDen fun inlineInstances =>
+      withSplicedInstances lctxStart instStaged hDen fun inlineInstances =>
         withMarker (stage + 1) (someEntry entry) escaped <|
           k instStaged hDen inlineInstances
     return (false, instStaged, stage, result)
   else
     let instStaged ← synthInstance (mkConst ``Staged)
-    let interp := mkStagedInterp instStaged
+    let den := mkStagedDen instStaged
     let hDenName ← mkFreshUserName hDenName
-    withLocalDecl hDenName .default (mkEqDen interp)
+    withLocalDecl hDenName .default den
         (kind := .implDetail) fun hDen => do
       let entry ← mkEntry instStaged hDen
       withTheReader Meta.Context ({ · with localInstances := #[] }) <|
-        withSplicedInstances lctxStart interp hDen fun inlineInstances => do
+        withSplicedInstances lctxStart instStaged hDen fun inlineInstances => do
           let result ← withMarker (stage + 1) (someEntry entry) escaped <|
             k instStaged hDen inlineInstances
           return (true, instStaged, stage, result)
@@ -184,8 +183,8 @@ public def escapeDenContext
     let instStagedName ← mkFreshUserName instStagedName
     let hDenName ← mkFreshUserName hDenName
     withLocalDecl instStagedName .instImplicit (mkConst ``Staged) fun instStaged => do
-      let interp := mkStagedInterp instStaged
-      withLocalDecl hDenName .default (mkEqDen interp)
+      let den := mkStagedDen instStaged
+      withLocalDecl hDenName .default den
           (kind := .implDetail) fun hDen => do
         let entry ← mkEntry instStaged hDen
         withMarker (stage - 1) noneEntry (mkConsEntry entry escaped) <|
